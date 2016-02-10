@@ -19,10 +19,13 @@
 #include <errno.h>
 #include <zlib.h>
 #include <sys/xattr.h>
+#include <limits.h>
 
 #include "globus_gridftp_server.h"
 #include "dsi_ceph.h"
 #include "ceph_posix.h"
+#include <gssapi.h>
+#include <stdlib.h>
 
 #define  CA_MAXCKSUMLEN 32
 #define  CA_MAXCKSUMNAMELEN 15
@@ -35,6 +38,67 @@ globus_version_t local_version = {
   0 /* branch ID */
 };
 
+char **valid_users;
+char **valid_pools;
+
+char *default_user;
+
+
+static int countChars(const char* src, char target) {
+  char *tempStr = strdup(src);
+  int count = 0;
+  while (tempStr != NULL) {
+    tempStr = strchr(tempStr, target);
+    if (tempStr) {
+      tempStr++;
+      count++;
+    }
+  }
+  return count;
+}
+
+static char** getTokens(char *tokensvar, const char delim[]) {
+  if (tokensvar == NULL) {
+    return NULL;
+  }
+  int nTokens =  countChars(tokensvar, ',')+1; // One more token than delimiters
+  char **tokens_arr = (char **)malloc((nTokens+1) * sizeof(char *)); // Allow sentinel element
+  
+  char *currentStr = strdup(tokensvar);
+  int i = 0;
+  while (currentStr != NULL) {
+    tokens_arr[i++] = strsep(&currentStr, delim);
+  }
+  tokens_arr[i] = NULL; // Put a sentinel value in the last element
+  return tokens_arr;
+}
+
+static int testValid(const char *candidate, char **validList){
+  
+  int found = 0;
+  int i;
+  for (i = 0; validList[i] != NULL; i++) { // Loop until sentinel
+    if (!strcmp(candidate, validList[i])) {
+      found = 1;
+      break;
+    }
+  }
+  return found;
+}
+
+/*
+ * Utility function to get an integer value from the environment
+ */
+static int getconfigint(char *key) {
+    
+  char *intStr = getenv(key);
+  if (NULL == intStr) {
+     globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: Invalid integer value '%s'\n",
+          "getconfigint", key); 
+  }
+  return NULL == intStr ? 0 : atoi(intStr);
+
+}
 /*
  *  utility function to make errors
  */
@@ -185,6 +249,21 @@ static void globus_l_gfs_ceph_start(globus_gfs_operation_t op,
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: started, uid: %u, gid: %u\n",
                          func, getuid(),getgid());
   globus_mutex_init(&ceph_handle->mutex,NULL);
+  
+  globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: host_id = %s\n",
+                         func, session_info->host_id);  
+  ceph_posix_set_username(session_info->username);
+   
+  
+//  valid_users = getTokens(getenv("GRIDFTP_CEPH_VALID_USERS"), ",");
+//  if (valid_users == NULL) {
+//      
+//      globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: cannot get valid users from key %s\n"
+//              , __FUNCTION__, "GRIDFTP_CEPH_VALID_USERS");
+//      finished_info.result = GLOBUS_FAILURE;
+//      globus_gridftp_server_operation_finished(op, GLOBUS_FAILURE, &finished_info);
+//      return;
+//  }
 
   memset(&finished_info, '\0', sizeof(globus_gfs_finished_info_t));
   finished_info.type = GLOBUS_GFS_OP_SESSION_START;
@@ -192,10 +271,10 @@ static void globus_l_gfs_ceph_start(globus_gfs_operation_t op,
   finished_info.info.session.session_arg = ceph_handle;
   finished_info.info.session.username = session_info->username;
   finished_info.info.session.home_dir = NULL; /* if null we will go to HOME directory */
-
   ceph_handle->checksum_list=NULL;
   ceph_handle->checksum_list_p=NULL;
   globus_gridftp_server_operation_finished(op, GLOBUS_SUCCESS, &finished_info);
+   
 }
 
 /*************************************************************************
@@ -211,7 +290,7 @@ static void globus_l_gfs_ceph_destroy(void *user_arg) {
   globus_mutex_destroy(&ceph_handle->mutex);
   globus_free(ceph_handle);
 }
-
+char *nonexistentpath;
 /*************************************************************************
  *  stat
  *  ----
@@ -230,15 +309,58 @@ static void globus_l_gfs_ceph_stat(globus_gfs_operation_t op,
   struct stat64                    statbuf;
   int                              status=0;
   globus_result_t                  result;
-
+  
   GlobusGFSName(globus_l_gfs_ceph_stat);
-  ceph_handle = (globus_l_gfs_ceph_handle_t *) user_arg;
+//  ceph_handle = (globus_l_gfs_ceph_handle_t *) user_arg;
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s: %s\n",
                          func, stat_info->pathname);
-  status = ceph_posix_stat64(stat_info->pathname, &statbuf);
+  
+  char *realpath = strdup(stat_info->pathname);
+//  
+//  
+////  status = ceph_posix_stat64(stat_info->pathname, &statbuf);
+// 
+//  valid_users = getTokens(getenv("GRIDFTP_CEPH_VALID_USERS"), ",");
+//  if (valid_users == NULL) {
+//      
+//      globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: cannot get valid users from key %s\n"
+//              , __FUNCTION__, "GRIDFTP_CEPH_VALID_USERS");
+//    
+//    result=globus_l_gfs_make_error("stat64/server configuration error\n");
+//    globus_gridftp_server_finished_stat(op,result,NULL, 0);
+//    return;
+//  }
+//  
+//  valid_pools = getTokens(getenv("GRIDFTP_CEPH_VALID_POOLS"), ",");
+//  if (valid_pools == NULL) {
+//        
+//      globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: cannot get valid pools from key %s\n"
+//              , __FUNCTION__, "GRIDFTP_CEPH_VALID_POOLS");
+//    
+//    result=globus_l_gfs_make_error("stat64/server configuration error\n");
+//    globus_gridftp_server_finished_stat(op,result,NULL, 0);
+//    return;
+//  }
+  
+
+  
+  
+  status = ceph_posix_stat64(realpath, &statbuf);
+  
   if (status != 0) {
+      globus_gfs_log_message(GLOBUS_GFS_LOG_INFO, 
+              "%s: Return from stat64 = %d\n", __FUNCTION__, status);    
+    if (status == -EINVAL) {
+      globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: cannot get striper\n", __FUNCTION__);
+    }
     result=globus_l_gfs_make_error("stat64");
     globus_gridftp_server_finished_stat(op,result,NULL, 0);
+    if (status == -ENOENT) {
+      globus_gfs_log_message(GLOBUS_GFS_LOG_INFO, 
+              "%s: Setting nonexistent path to %s\n", __FUNCTION__, realpath);
+      
+      nonexistentpath = strdup(realpath);
+    }
     return;
   }
   stat_array = (globus_gfs_stat_t *) globus_calloc(1, sizeof(globus_gfs_stat_t));
@@ -248,7 +370,7 @@ static void globus_l_gfs_ceph_stat(globus_gfs_operation_t op,
     return;
   }
   stat_count=1;
-  fill_stat_array(&(stat_array[0]), statbuf, stat_info->pathname);
+  fill_stat_array(&(stat_array[0]), statbuf, realpath /* stat_info->pathname */);
   globus_gridftp_server_finished_stat(op, GLOBUS_SUCCESS, stat_array, stat_count);
   free_stat_array(stat_array, stat_count);
   globus_free(stat_array);
@@ -278,11 +400,81 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
                                       globus_gfs_command_info_t *cmd_info,
                                       void *user_arg) {
   globus_result_t result;
-  (void)cmd_info;
+  int cmd = cmd_info->command;
   (void)user_arg;
   GlobusGFSName(globus_l_gfs_ceph_command);
-  /* in gridftp disk server we do not allow to perform commads */
-  result=GlobusGFSErrorGeneric("error: commands denied");
+  
+//  char *cksm_alg;
+//  globus_off_t cksm_offset;
+//  globus_off_t cksm_length;
+
+  
+  switch (cmd) {
+    /* Support DELE for GridPP FTS when the target already exists*/
+    case GLOBUS_GFS_CMD_DELE:
+      globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "COMMAND is DELE %s\n", cmd_info->pathname);
+      if (nonexistentpath != NULL) {
+        globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, 
+                "We have an saved pathname, have to LIE to FTS...\n", nonexistentpath);
+
+        result = GLOBUS_SUCCESS;
+        globus_gridftp_server_finished_command(op, result, GLOBUS_NULL);
+        return;
+      } else {
+        errno = ENOENT;
+        int status = ceph_posix_delete(cmd_info->pathname);
+        if (status != 0) {
+          globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, 
+                "\t\tDELE return code is %d\n", status);    
+          result = GLOBUS_FAILURE;
+          globus_gridftp_server_finished_command(op, result, GLOBUS_NULL);
+          return;        
+        } else {
+          result = GLOBUS_SUCCESS; 
+          globus_gridftp_server_finished_command(op, result, GLOBUS_NULL);
+          return;
+        }
+      }
+      
+    /*
+     * Support MKD because GridPP FTS thinks it needs to make a *directory* '/' for a non-existent target
+     * Target name sent as a Globus URL always contains a slash which tricks client into thinking it is
+     * dealing with a hierarchical pathname, not a Ceph object name
+     * We fool the FTS client (which isn't aware that the Ceph object store doesn't support directories)
+     * into thinking that is has created the directory it wants to see, and can then continue with the rest of the
+     * FTS transfer
+     */
+    case GLOBUS_GFS_CMD_MKD:
+      globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "COMMAND is MKD\n");
+      /*
+       * The core of GrdiFTP wil return a '257 MKD Pathname: Created Successfully message'
+       */
+      globus_gridftp_server_finished_command(op, GLOBUS_SUCCESS, GLOBUS_NULL);
+      return;    
+ 
+    /*
+     * Support CKSM command. This DSI only stores checksums using the ADLER32 algorithm.
+     * Check whether objects stored by XROOTD have a checksum stored
+     * 
+     */
+      
+    case GLOBUS_GFS_CMD_CKSM:
+      
+      ; // Yes, we need a statement between the label and variable declarations...
+//      cksm_alg = cmd_info->cksm_alg; // In case we support checksums other than ADLER32 in the future...
+//      /** offset for cksm command */
+//      cksm_offset = cmd_info->cksm_offset;
+//      /** length of data to read for cksm command   -1 means full file */
+//      cksm_length = cmd_info->cksm_length;
+      char *checksum = ceph_posix_get_checksum(cmd_info->pathname);
+      globus_gridftp_server_finished_command(op, GLOBUS_SUCCESS, checksum);
+      return; 
+      
+    default:
+      break;
+  }
+  /* Complain if command is neither MKD nor DELE */
+  result=GlobusGFSErrorGeneric("error: commands other than MKD or DELE are denied");
   globus_gridftp_server_finished_command(op, result, GLOBUS_NULL);
   return;
 }
@@ -321,6 +513,9 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
   char *                       ckSumalg = "ADLER32"; /* we only support Adler32 for gridftp */
   char *                       func = "globus_l_gfs_file_net_read_cb";
 
+  if (!strcmp(getdebug(), "1")){
+    globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,"%s: start, offset =%lld\n", func, offset);
+  }
   ceph_handle = (globus_l_gfs_ceph_handle_t *) user_arg;
 
   globus_mutex_lock(&ceph_handle->mutex);
@@ -340,8 +535,11 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
         bytes_written = ceph_posix_write(ceph_handle->fd, buffer, nbytes);
         if (bytes_written < 0) {
           globus_gfs_log_message(GLOBUS_GFS_LOG_ERR,"%s: write error, return code %d \n",func, -bytes_written);
-          ceph_handle->cached_res = GLOBUS_FAILURE;
+          ceph_handle->cached_res = GLOBUS_FAILURE; //globus_l_gfs_make_error("write"); // GLOBUS_FAILURE;
           ceph_handle->done = GLOBUS_TRUE;
+          ceph_handle->fileSize = 0;
+          globus_mutex_unlock(&ceph_handle->mutex);
+          return;
         } else {
           /* fill the checksum list  */
           /* we will have a lot of checksums blocks in the list */
@@ -474,7 +672,12 @@ static void globus_l_gfs_ceph_read_from_net
   globus_byte_t *                     buffer;
   globus_result_t                     result;
   char *                     func="globus_l_gfs_ceph_read_from_net";
-
+  
+  if(!strcmp(getdebug(), "1")) {
+    globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
+                             "%s: start\n",
+                             func);
+  }
   GlobusGFSName(globus_l_gfs_ceph_read_from_net);
   /* in the read case this number will vary */
   globus_gridftp_server_get_optimal_concurrency(ceph_handle->op,
@@ -512,7 +715,7 @@ static void globus_l_gfs_ceph_read_from_net
     ceph_handle->outstanding++;
   }
 }
-
+    
 /*************************************************************************
  *  recv
  *  ----
@@ -552,13 +755,42 @@ static void globus_l_gfs_ceph_recv(globus_gfs_operation_t op,
   }
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: pathname: %s \n",func,pathname);
 
-  /* try to open */
+  struct stat64 sbuf;  
+  int rc = ceph_posix_stat64(pathname, &sbuf);
+  
   flags = O_WRONLY | O_CREAT;
-  if(transfer_info->truncate) flags |= O_TRUNC;
+  int allow_overwrite = 1;
+  if (rc == 0) { // File exists
+    
+    if (allow_overwrite == 1) {
+      globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s : File %s exists - about to delete\n", __FUNCTION__, pathname);
+ /*      if (transfer_info->alloc_size < sbuf.st_size)  */
+      rc = ceph_posix_delete(pathname); // ceph_posix_truncate(pathname,mode, flags, 0); // Seems to fail with dodgy pools?
+
+      if (rc != 0) {
+        /* globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s : Cannot truncate %s\n", __FUNCTION__, pathname); // reported in ceph_posix_truncate */
+        free(pathname);
+        result = globus_l_gfs_make_error("open/delete");
+        globus_gridftp_server_finished_transfer(op, result);
+        return;
+      }
+    } else {
+      globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s : File %s exists - Not allowing overwrites\n", __FUNCTION__, pathname);
+      free(pathname);
+      result = globus_l_gfs_make_error("open: cannot overwrite");
+      globus_gridftp_server_finished_transfer(op, result);
+      return;      
+    }
+  }
+  if(transfer_info->truncate) {
+    flags |= O_TRUNC;
+  }
+  /* try to open */
 
   ceph_handle->fd = ceph_handle_open(pathname, flags, 0644, ceph_handle);
 
   if (ceph_handle->fd < 0) {
+    errno = EACCES; 
     result=globus_l_gfs_make_error("open/create");
     free(pathname);
     globus_gridftp_server_finished_transfer(op, result);
@@ -574,6 +806,14 @@ static void globus_l_gfs_ceph_recv(globus_gfs_operation_t op,
   ceph_handle->op = op;
 
   globus_gridftp_server_get_block_size(op, &ceph_handle->block_size);
+  
+  int blksize = getconfigint("GRIDFTP_CEPH_WRITE_SIZE");
+  if (blksize > 0) {
+     ceph_handle->block_size = blksize; 
+  } else {
+     globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: Invalid %s block_size: %ld\n",
+          func, "GRIDFTP_CEPH_WRITE_SIZE", blksize);
+  } 
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: block size: %ld\n",
                          func,ceph_handle->block_size);
 
@@ -627,7 +867,7 @@ static void globus_l_gfs_ceph_send(globus_gfs_operation_t op,
   int                 i;
   globus_bool_t                       done;
   globus_result_t                     result;
-
+  
   GlobusGFSName(globus_l_gfs_ceph_send);
   ceph_handle = (globus_l_gfs_ceph_handle_t *) user_arg;
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: started\n",func);
@@ -640,6 +880,17 @@ static void globus_l_gfs_ceph_send(globus_gfs_operation_t op,
   }
 
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: pathname: %s\n",func,pathname);
+  
+  /* Check whether the file exists before going any further */
+  struct stat64 sbuf;
+  int rc = ceph_posix_stat64(pathname, &sbuf);
+  if (rc != 0) {
+     result = globus_l_gfs_make_error("open/stat64");
+     free(pathname);
+     globus_gridftp_server_finished_transfer(op, result);
+     return;    
+  }  
+  
   /* mode is ignored */
   ceph_handle->fd = ceph_handle_open(pathname, O_RDONLY,
                                            0, ceph_handle);
@@ -664,6 +915,14 @@ static void globus_l_gfs_ceph_send(globus_gfs_operation_t op,
                          func,ceph_handle->optimal_count);
 
   globus_gridftp_server_get_block_size(op, &ceph_handle->block_size);
+ 
+  int blksize = getconfigint("GRIDFTP_CEPH_READ_SIZE");
+  if (blksize > 0) {
+     ceph_handle->block_size = blksize; 
+  } else {
+     globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: Invalid %s block_size: %ld\n",
+          func, "GRIDFTP_CEPH_READ_SIZE", blksize);
+  } 
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: block_size: %ld\n",
                          func,ceph_handle->block_size);
 
@@ -1006,6 +1265,10 @@ GlobusExtensionDefineModule(globus_gridftp_server_ceph) = {
   NULL
 };
 
+
+
+
+
 /*
  *  no need to change this
  */
@@ -1017,7 +1280,9 @@ static int globus_l_gfs_ceph_activate(void) {
   // initialize ceph wrapper log
   ceph_posix_set_logfunc(ceph_logfunc_wrapper);
   // setup defaults from environment
-  ceph_posix_set_defaults(getenv("GRIDFTP_CEPH_DEFAULTS"));
+//  ceph_posix_set_defaults(getenv("GRIDFTP_CEPH_DEFAULTS"));
+  
+
   return 0;
 }
 
