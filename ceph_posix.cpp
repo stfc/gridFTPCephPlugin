@@ -863,7 +863,7 @@ extern "C" {
     std::map<unsigned int, CephFileRef>::iterator it = g_fds.find(fd);
     if (it != g_fds.end()) {
       CephFileRef &fr = it->second;
-#ifdef WIBBLERS     
+#ifdef VERYLOWLEVELTRACE     
       logwrapper((char*)"ceph_lseek64: for fd %d, offset=%lld, whence=%d\n", fd, offset, whence);
 #endif
       return lseek_compute_offset(fr, offset, whence);
