@@ -3,9 +3,12 @@ This provides a gridFTP plugin to access ceph data stores.
 It builds with cmake and will create a libglobus_gridftp_server_ceph.so file to be used when launching the server.
 Something like : /usr/sbin/globus-gridftp-server -dsi ceph -allowed-modules ceph
 
-In order to define which ceph pool, userId and layout should be used, on should define the environment variable GRIDFTP_CEPH_DEFAULTS with a string in format [<userID>@]pool[,nbStripes[,stripeUnit[,objectSize]]]
+URL Syntax:
+[USERID_IGNORED]@pool[,nbStripes[,stripeUnit[,objectSize]]]:object-path
 
-Current known issues :
-  - in principle, paths can also be prepended with a similar string and a ':' to modify this default file by file. But this is currently broken (see next point for why)
-  - paths that do not start with '/' get a slash appended in the server as they are considered relative.
+The USERID is taken from the GSI account mapping. This has been tested with grid-mapfile.
+The storage pool must be specified in the URL.
+The object-path can include a leading slash, if desired. However, this is not required.
+
+The environment variable GRIDFTP_CEPH_DEFAULTS is no longer used. Defaults for nbStripes (1), stripeUnit (4MiB), and objectSize (4MiB) are compiled into the DSI code.
 
