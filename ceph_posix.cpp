@@ -910,10 +910,15 @@ extern "C" {
 
   ssize_t ceph_posix_read(int fd, void *buf, size_t count) {
     std::map<unsigned int, CephFileRef>::iterator it = g_fds.find(fd);
+    static int reported_size = 0;
+    
     if (it != g_fds.end()) {
       CephFileRef &fr = it->second;
-#ifdef LOWLEVELTRACE      
-      logwrapper((char*)"ceph_read: for fd %d, count=%d\n", fd, count);
+#ifdef LOWLEVELTRACE  
+      if (reported_size == 0) {
+        logwrapper((char*)"%s: for fd %d, count=%d\n", __FUNCTION__, fd, count);
+        reported_size = 1;
+      }
 #endif      
       if ((fr.flags & O_WRONLY) != 0) {
         return -EBADF;
