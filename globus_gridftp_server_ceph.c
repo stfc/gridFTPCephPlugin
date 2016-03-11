@@ -400,7 +400,7 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
     default:
       break;
   }
-  /* Complain if command is neither CKSM or DELE*/
+  /* Complain if command is neither CKSM, DELE, or MKD */
   globus_gridftp_server_finished_command(op, 
           GlobusGFSErrorGeneric("error: commands other than CKSM, DELE, or MKD are denied"), GLOBUS_NULL);
   return;
