@@ -12,7 +12,8 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
+  char *ceph_posix_get_checksum(const char* pathname);
+  const char *getdebug();
   void ceph_posix_set_defaults(const char* value);
   void ceph_posix_disconnect_all();
   void ceph_posix_set_logfunc(void (*logfunc) (char *, va_list argp));

@@ -1,0 +1,4 @@
+<globus-url-copy> file:///<localFileName> <gsiFTPURLPrefix>/<objectName>
+<globus-url-copy> <gsiFTPURLPrefix>/<objectName> file:///<tmpLocalFileName2>
+diff <localFileName> <tmpLocalFileName2>
+rados --id <cephUserId> -p <cephPool> stat /<objectName>.0000000000000000

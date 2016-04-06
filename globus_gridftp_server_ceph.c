@@ -19,10 +19,17 @@
 #include <errno.h>
 #include <zlib.h>
 #include <sys/xattr.h>
+#include <limits.h>
 
 #include "globus_gridftp_server.h"
+//#include "globus-server-include/globus_i_gfs_acl.h"
+//#include "globus-server-include/globus_i_gfs_data.h"
+//#include "/usr/include/globus/globus_ftp_control.h"
+//#include "globus_types.h"
 #include "dsi_ceph.h"
 #include "ceph_posix.h"
+//#include <gssapi.h>
+//#include <stdlib.h>
 
 #define  CA_MAXCKSUMLEN 32
 #define  CA_MAXCKSUMNAMELEN 15
@@ -35,6 +42,19 @@ globus_version_t local_version = {
   0 /* branch ID */
 };
 
+/*
+ * Utility function to get an integer value from the environment
+ */
+static int getconfigint(char *key) {
+    
+  char *intStr = getenv(key);
+  if (NULL == intStr) {
+     globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: Invalid integer value '%s'\n",
+          "getconfigint", key); 
+  }
+  return NULL == intStr ? 0 : atoi(intStr);
+
+}
 /*
  *  utility function to make errors
  */
@@ -141,14 +161,13 @@ static void ceph_logfunc_wrapper (char *format, va_list argp) {
 
 /* a function to wrap all is needed to close a file */
 static void globus_ceph_close(const char* func,
-                                globus_l_gfs_ceph_handle_t* ceph_handle,
-                                const char* ckSumbuf,
-                                const char* error_msg) {
+                              globus_l_gfs_ceph_handle_t* ceph_handle,
+                              const char* error_msg) {
   char* errorBuf = NULL;
   ceph_handle->done = GLOBUS_TRUE;
   ceph_posix_close(ceph_handle->fd);
   if (error_msg) {
-    ceph_handle->cached_res = GLOBUS_FAILURE;
+    ceph_handle->cached_res = globus_l_gfs_make_error(error_msg);
     globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: terminating transfer on error: %s\n", func, error_msg);
     errorBuf = strdup(error_msg);
   }
@@ -186,6 +205,11 @@ static void globus_l_gfs_ceph_start(globus_gfs_operation_t op,
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: started, uid: %u, gid: %u\n",
                          func, getuid(),getgid());
   globus_mutex_init(&ceph_handle->mutex,NULL);
+  
+  globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: host_id = %s\n",
+                         func, session_info->host_id);  
+  ceph_posix_set_username(session_info->username);
+   
 
   memset(&finished_info, '\0', sizeof(globus_gfs_finished_info_t));
   finished_info.type = GLOBUS_GFS_OP_SESSION_START;
@@ -193,10 +217,10 @@ static void globus_l_gfs_ceph_start(globus_gfs_operation_t op,
   finished_info.info.session.session_arg = ceph_handle;
   finished_info.info.session.username = session_info->username;
   finished_info.info.session.home_dir = NULL; /* if null we will go to HOME directory */
-
   ceph_handle->checksum_list=NULL;
   ceph_handle->checksum_list_p=NULL;
   globus_gridftp_server_operation_finished(op, GLOBUS_SUCCESS, &finished_info);
+   
 }
 
 /*************************************************************************
@@ -231,28 +255,63 @@ static void globus_l_gfs_ceph_stat(globus_gfs_operation_t op,
   struct stat64                    statbuf;
   int                              status=0;
   globus_result_t                  result;
-
+  
   GlobusGFSName(globus_l_gfs_ceph_stat);
-  ceph_handle = (globus_l_gfs_ceph_handle_t *) user_arg;
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s: %s\n",
                          func, stat_info->pathname);
-  status = ceph_posix_stat64(stat_info->pathname, &statbuf);
-  if (status != 0) {
-    result=globus_l_gfs_make_error("stat64");
-    globus_gridftp_server_finished_stat(op,result,NULL, 0);
-    return;
+  
+  char *realpath = strdup(stat_info->pathname);
+
+  if (strcmp("/", realpath) != 0) {
+
+    status = ceph_posix_stat64(realpath, &statbuf);
+
+    if (status != 0) {
+      globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
+              "%s: Return from stat64 = %d\n", __FUNCTION__, status);
+      if (status == -EINVAL) {
+        globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: cannot get striper\n", __FUNCTION__);
+      }
+      result = globus_l_gfs_make_error("stat64");
+      globus_gridftp_server_finished_stat(op, result, NULL, 0);
+
+      return;
+    }
+    stat_array = (globus_gfs_stat_t *) globus_calloc(1, sizeof (globus_gfs_stat_t));
+    if (stat_array == NULL) {
+      result = GlobusGFSErrorGeneric("error: memory allocation failed");
+      globus_gridftp_server_finished_stat(op, result, NULL, 0);
+      return;
+    }
+    stat_count = 1;
+    fill_stat_array(&(stat_array[0]), statbuf, realpath /* stat_info->pathname */);
+    globus_gridftp_server_finished_stat(op, GLOBUS_SUCCESS, stat_array, stat_count);
+    free_stat_array(stat_array, stat_count);
+    globus_free(stat_array);
+
+  } else { // Sometimes, the FTS client will send a 'MLST /' command when the target doesn't exist
+           // The particular conditions under which this can happen are as yet unclear
+    stat_count = 1;
+    statbuf.st_uid = 0;
+    statbuf.st_gid = 0;
+    statbuf.st_mode = __S_IFDIR|0666;
+    statbuf.st_size = 0;
+    statbuf.st_atime = 0;
+    statbuf.st_ctime = 0;
+    statbuf.st_mtime = 0;
+    stat_array = (globus_gfs_stat_t *) globus_calloc(1, sizeof (globus_gfs_stat_t));
+    if (stat_array == NULL) {
+      result = GlobusGFSErrorGeneric("error: memory allocation failed");
+      globus_gridftp_server_finished_stat(op, result, NULL, 0);
+      return;
+    }
+    stat_count = 1;
+    fill_stat_array(&(stat_array[0]), statbuf, realpath /* stat_info->pathname */);
+    globus_gridftp_server_finished_stat(op, GLOBUS_SUCCESS, stat_array, stat_count);
+    free_stat_array(stat_array, stat_count);
+    globus_free(stat_array);
   }
-  stat_array = (globus_gfs_stat_t *) globus_calloc(1, sizeof(globus_gfs_stat_t));
-  if (stat_array==NULL) {
-    result=GlobusGFSErrorGeneric("error: memory allocation failed");
-    globus_gridftp_server_finished_stat(op,result,NULL, 0);
-    return;
-  }
-  stat_count=1;
-  fill_stat_array(&(stat_array[0]), statbuf, stat_info->pathname);
-  globus_gridftp_server_finished_stat(op, GLOBUS_SUCCESS, stat_array, stat_count);
-  free_stat_array(stat_array, stat_count);
-  globus_free(stat_array);
+  
   return;
 }
 
@@ -278,13 +337,72 @@ static void globus_l_gfs_ceph_stat(globus_gfs_operation_t op,
 static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
                                       globus_gfs_command_info_t *cmd_info,
                                       void *user_arg) {
-  globus_result_t result;
-  (void)cmd_info;
-  (void)user_arg;
+
   GlobusGFSName(globus_l_gfs_ceph_command);
-  /* in gridftp disk server we do not allow to perform commads */
-  result=GlobusGFSErrorGeneric("error: commands denied");
-  globus_gridftp_server_finished_command(op, result, GLOBUS_NULL);
+  
+//  char *cksm_alg;
+//  globus_off_t cksm_offset;
+//  globus_off_t cksm_length;
+
+
+  switch (cmd_info->command) {
+      /* Support DELE for GridPP FTS when the target already exists*/
+    case GLOBUS_GFS_CMD_DELE:
+      ; // Yes, we need a statement between label and declaration
+      int status = ceph_posix_delete(cmd_info->pathname);
+      if (status != 0) {
+        globus_gfs_log_message(GLOBUS_GFS_LOG_ERR,
+                "\t\tDELE return code is %d\n", status); // Log the actual failure reason... 
+        errno = ENOENT; // but tell the client that target doesn't exist.
+        globus_gridftp_server_finished_command(op, GLOBUS_SUCCESS, GLOBUS_NULL);
+        return;
+      } else {
+        errno = 0;
+        globus_gridftp_server_finished_command(op, GLOBUS_SUCCESS, GLOBUS_NULL);
+        return;
+      }
+
+      
+    /*
+     * Support MKD because GridPP FTS thinks it needs to make a *directory* '/' for a non-existent target
+     * Target name sent as a Globus URL always contains a slash which tricks client into thinking it is
+     * dealing with a hierarchical pathname, not a Ceph object name
+     * We fool the FTS client (which isn't aware that the Ceph object store doesn't support directories)
+     * into thinking that is has created the directory it wants to see, and can then continue with the rest of the
+     * FTS transfer
+     *  
+     */
+    case GLOBUS_GFS_CMD_MKD:
+      /*
+       * The core of GrdiFTP will return a '257 MKD <pathname> Pathname: Created Successfully message'
+       */
+      globus_gridftp_server_finished_command(op, GLOBUS_SUCCESS, GLOBUS_NULL);
+      return;    
+ 
+    /*
+     * Support CKSM command. This DSI only stores checksums using the ADLER32 algorithm.
+     * To-do: Check whether objects stored by XROOTD DSI have a checksum stored
+     * 
+     */
+      
+    case GLOBUS_GFS_CMD_CKSM:
+      
+      ; // Yes, we need a statement between the label and variable declarations...
+//      cksm_alg = cmd_info->cksm_alg; // In case we support checksums other than ADLER32 in the future...
+//      /** offset for cksm command */
+//      cksm_offset = cmd_info->cksm_offset;
+//      /** length of data to read for cksm command   -1 means full file */
+//      cksm_length = cmd_info->cksm_length;
+      char *checksum = ceph_posix_get_checksum(cmd_info->pathname);
+      globus_gridftp_server_finished_command(op, GLOBUS_SUCCESS, checksum);
+      return; 
+      
+    default:
+      break;
+  }
+  /* Complain if command is neither CKSM, DELE, or MKD */
+  globus_gridftp_server_finished_command(op, 
+          GlobusGFSErrorGeneric("error: commands other than CKSM, DELE, or MKD are denied"), GLOBUS_NULL);
   return;
 }
 
@@ -321,7 +439,15 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
   char                         ckSumbuf[CA_MAXCKSUMLEN+1] = "0";
   char *                       ckSumalg = "ADLER32"; /* we only support Adler32 for gridftp */
   char *                       func = "globus_l_gfs_file_net_read_cb";
+  
+  static int reported_nbytes = 0;
 
+  if (!strcmp(getdebug(), "1")){
+    if (reported_nbytes == 0) {
+      globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,"%s: start, offset =%lld, nbytes= %d\n", func, offset, nbytes);
+    reported_nbytes = 1;
+    }
+  }
   ceph_handle = (globus_l_gfs_ceph_handle_t *) user_arg;
 
   globus_mutex_lock(&ceph_handle->mutex);
@@ -341,8 +467,11 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
         bytes_written = ceph_posix_write(ceph_handle->fd, buffer, nbytes);
         if (bytes_written < 0) {
           globus_gfs_log_message(GLOBUS_GFS_LOG_ERR,"%s: write error, return code %d \n",func, -bytes_written);
-          ceph_handle->cached_res = GLOBUS_FAILURE;
+          ceph_handle->cached_res = GLOBUS_FAILURE; //globus_l_gfs_make_error("write"); // GLOBUS_FAILURE;
           ceph_handle->done = GLOBUS_TRUE;
+          ceph_handle->fileSize = 0;
+          globus_mutex_unlock(&ceph_handle->mutex);
+          return;
         } else {
           /* fill the checksum list  */
           /* we will have a lot of checksums blocks in the list */
@@ -366,7 +495,7 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
           ceph_handle->checksum_list_p=ceph_handle->checksum_list_p->next;
           ceph_handle->number_of_blocks++;
           /* end of the checksum section */
-          if(bytes_written < nbytes) {
+          if((globus_size_t)bytes_written < nbytes) {
             errno = ENOSPC;
             ceph_handle->cached_res = globus_l_gfs_make_error("write");
             ceph_handle->done = GLOBUS_TRUE;
@@ -391,7 +520,7 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
         if (checksum_array == NULL) {
           free_checksum_list(ceph_handle->checksum_list);
           ceph_handle->fileSize = 0;
-          globus_ceph_close(func, ceph_handle, NULL, "Internal error (malloc)");
+          globus_ceph_close(func, ceph_handle, "Internal error (malloc failed)");
           globus_mutex_unlock(&ceph_handle->mutex);
           return;
         }
@@ -420,23 +549,27 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
         chkOffset += checksum_array[0]->size;
         /* go over all received chunks */
         for (i = 1; i < ceph_handle->number_of_blocks; i++) {
-          // not continuous, either a chunk is missing or we have overlapping chunks
-          if (checksum_array[i]->offset > chkOffset) {
-            // a chunk is missing, consider it full of 0s
-            globus_off_t doff = checksum_array[i]->offset - chkOffset;
-            file_checksum = adler32_combine_(file_checksum, adler32_0chunks(doff), doff);
-            chkOffset = checksum_array[i]->offset;
-          } else {
-            // overlapping chunks. This is not supported, fail the transfer
-            free_checksum_list(ceph_handle->checksum_list);
-            char errorBuf[1024];
-            sprintf(errorBuf, "Overlapping chunks detected while handling 0x%lx-0x%lx. The overlap starts at 0x%lx\n",
-                    (unsigned long int)checksum_array[i]->offset,
-                    (unsigned long int)checksum_array[i]->offset+checksum_array[i]->size,
-                    (unsigned long int)chkOffset);
-            globus_ceph_close(func, ceph_handle, NULL, errorBuf);
-            globus_mutex_unlock(&ceph_handle->mutex);
-            return;
+          /* check the continuity with previous chunk */
+          if (checksum_array[i]->offset != chkOffset) {
+            // not continuous, either a chunk is missing or we have overlapping chunks
+            if (checksum_array[i]->offset > chkOffset) {
+              // a chunk is missing, consider it full of 0s
+              globus_off_t doff = checksum_array[i]->offset - chkOffset;
+              file_checksum = adler32_combine_(file_checksum, adler32_0chunks(doff), doff);
+              chkOffset = checksum_array[i]->offset;
+            } else {
+              // overlapping chunks. This is not supported, fail the transfer
+              free_checksum_list(ceph_handle->checksum_list);
+              globus_gfs_log_message(GLOBUS_GFS_LOG_ERR,"%s: Overlapping chunks detected while handling 0x%x-0x%x. The overlap starts at 0x%x\n",
+                                     func,
+                                     checksum_array[i]->offset,
+                                     checksum_array[i]->offset+checksum_array[i]->size,
+                                     chkOffset);
+              globus_ceph_close(func, ceph_handle, "overlapping chunks detected when computing checksum");
+              globus_mutex_unlock(&ceph_handle->mutex);
+              globus_gridftp_server_finished_transfer(op, ceph_handle->cached_res);
+              return;
+            }
           }
           /* now handle the next chunk */
           file_checksum=adler32_combine_(file_checksum,
@@ -459,7 +592,7 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
           globus_gfs_log_message(GLOBUS_GFS_LOG_ERR,"%s: unable to store checksum value as xattr\n", func);
         }
       }
-      globus_ceph_close(func, ceph_handle, ckSumbuf, NULL);
+      globus_ceph_close(func, ceph_handle, NULL);
       globus_gridftp_server_finished_transfer(op, ceph_handle->cached_res);
     }
   }
@@ -471,25 +604,55 @@ static void globus_l_gfs_ceph_read_from_net
   globus_byte_t *                     buffer;
   globus_result_t                     result;
   char *                     func="globus_l_gfs_ceph_read_from_net";
+  
+  static int reported_sizes = 0;
+  static int reported_block_size = 0;
 
+  if(!strcmp(getdebug(), "1")) {
+    
+    if (reported_block_size == 0) {
+    globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
+                             "%s: start, ceph_handle->block_size = %d\n",
+                             func, ceph_handle->block_size);
+    reported_block_size = 1;
+    }
+  }
+  
   GlobusGFSName(globus_l_gfs_ceph_read_from_net);
   /* in the read case this number will vary */
+
+  
+//  ceph_handle->op->data_handle->info.blocksize = 33554432;
+
+  
   globus_gridftp_server_get_optimal_concurrency(ceph_handle->op,
                                                 &ceph_handle->optimal_count);
 
   while(ceph_handle->outstanding < ceph_handle->optimal_count) {
     buffer=globus_malloc(ceph_handle->block_size);
     if (buffer == NULL) {
-      result = GlobusGFSErrorGeneric("error: globus malloc failed");
-      ceph_handle->cached_res = result;
-      ceph_handle->done = GLOBUS_TRUE;
       if (ceph_handle->outstanding == 0) {
-        globus_ceph_close(func, ceph_handle, NULL, "malloc failed");
+        globus_ceph_close(func, ceph_handle, "internal error (malloc failed)");
         globus_gridftp_server_finished_transfer(ceph_handle->op,
                                                 ceph_handle->cached_res);
       }
       return;
     }
+
+    if (!strcmp(getdebug(), "1")) {     
+      if (reported_sizes == 0) {
+        globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
+                "%s: just before register_read, ceph_handle->block_size = %d\n",
+                func, ceph_handle->block_size);
+//        globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
+//                "%s: just before register_read, ceph_handle->op->data_handle->info.blocksize = %d\n",
+//                func, ceph_handle->op->data_handle->info.blocksize);   
+        
+        reported_sizes = 1;
+      
+      }
+    }
+            
     result= globus_gridftp_server_register_read(ceph_handle->op,
                                                 buffer,
                                                 ceph_handle->block_size,
@@ -502,9 +665,8 @@ static void globus_l_gfs_ceph_read_from_net
                              func);
       globus_free(buffer);
       ceph_handle->cached_res = result;
-      ceph_handle->done = GLOBUS_TRUE;
       if (ceph_handle->outstanding == 0) {
-        globus_ceph_close(func, ceph_handle, NULL, "register read has finished with a bad result");
+        globus_ceph_close(func, ceph_handle, "register read has finished with a bad result");
         globus_gridftp_server_finished_transfer(ceph_handle->op,
                                                 ceph_handle->cached_res);
       }
@@ -513,7 +675,7 @@ static void globus_l_gfs_ceph_read_from_net
     ceph_handle->outstanding++;
   }
 }
-
+    
 /*************************************************************************
  *  recv
  *  ----
@@ -552,14 +714,50 @@ static void globus_l_gfs_ceph_recv(globus_gfs_operation_t op,
     return;
   }
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: pathname: %s \n",func,pathname);
+  globus_size_t block_size;
+  globus_gridftp_server_get_block_size(op, &block_size);
 
-  /* try to open */
+  globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+          "%s: block_size from globus_gridftp_server_get_block_size: %d \n", func, block_size);
+  
+//  op->data_handle->info.blocksize = 33554432;
+
+  struct stat64 sbuf;  
+  int rc = ceph_posix_stat64(pathname, &sbuf);
+  
   flags = O_WRONLY | O_CREAT;
-  if(transfer_info->truncate) flags |= O_TRUNC;
+  int allow_overwrite = 1;
+  if (rc == 0) { // File exists
+    
+    if (allow_overwrite == 1) {
+      globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s : File %s exists - about to delete\n", __FUNCTION__, pathname);
+ /*      if (transfer_info->alloc_size < sbuf.st_size)  */
+      rc = ceph_posix_delete(pathname); // ceph_posix_truncate(pathname,mode, flags, 0); // Seems to fail with dodgy pools?
+
+      if (rc != 0) {
+        /* globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s : Cannot truncate %s\n", __FUNCTION__, pathname); // reported in ceph_posix_truncate */
+        free(pathname);
+        result = globus_l_gfs_make_error("open/delete");
+        globus_gridftp_server_finished_transfer(op, result);
+        return;
+      }
+    } else {
+      globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s : File %s exists - Not allowing overwrites\n", __FUNCTION__, pathname);
+      free(pathname);
+      result = globus_l_gfs_make_error("open: cannot overwrite");
+      globus_gridftp_server_finished_transfer(op, result);
+      return;      
+    }
+  }
+  if(transfer_info->truncate) {
+    flags |= O_TRUNC;
+  }
+  /* try to open */
 
   ceph_handle->fd = ceph_handle_open(pathname, flags, 0644, ceph_handle);
 
   if (ceph_handle->fd < 0) {
+    errno = EACCES; 
     result=globus_l_gfs_make_error("open/create");
     free(pathname);
     globus_gridftp_server_finished_transfer(op, result);
@@ -575,7 +773,15 @@ static void globus_l_gfs_ceph_recv(globus_gfs_operation_t op,
   ceph_handle->op = op;
 
   globus_gridftp_server_get_block_size(op, &ceph_handle->block_size);
-  globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: block size: %ld\n",
+  
+  int blksize = getconfigint("GRIDFTP_CEPH_WRITE_SIZE");
+  if (blksize > 0) {
+     ceph_handle->block_size = blksize; 
+  } else {
+     globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: Invalid %s block_size: %ld\n",
+          func, "GRIDFTP_CEPH_WRITE_SIZE", blksize);
+  } 
+  globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: block size set on ceph_handle: %ld\n",
                          func,ceph_handle->block_size);
 
   /* here we will save all checksums for the file blocks        */
@@ -628,7 +834,7 @@ static void globus_l_gfs_ceph_send(globus_gfs_operation_t op,
   int                 i;
   globus_bool_t                       done;
   globus_result_t                     result;
-
+  
   GlobusGFSName(globus_l_gfs_ceph_send);
   ceph_handle = (globus_l_gfs_ceph_handle_t *) user_arg;
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: started\n",func);
@@ -641,6 +847,17 @@ static void globus_l_gfs_ceph_send(globus_gfs_operation_t op,
   }
 
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: pathname: %s\n",func,pathname);
+  
+  /* Check whether the file exists before going any further */
+  struct stat64 sbuf;
+  int rc = ceph_posix_stat64(pathname, &sbuf);
+  if (rc != 0) {
+     result = globus_l_gfs_make_error("open/stat64");
+     free(pathname);
+     globus_gridftp_server_finished_transfer(op, result);
+     return;    
+  }  
+  
   /* mode is ignored */
   ceph_handle->fd = ceph_handle_open(pathname, O_RDONLY,
                                            0, ceph_handle);
@@ -665,6 +882,14 @@ static void globus_l_gfs_ceph_send(globus_gfs_operation_t op,
                          func,ceph_handle->optimal_count);
 
   globus_gridftp_server_get_block_size(op, &ceph_handle->block_size);
+ 
+  int blksize = getconfigint("GRIDFTP_CEPH_READ_SIZE");
+  if (blksize > 0) {
+     ceph_handle->block_size = blksize; 
+  } else {
+     globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: Invalid %s block_size: %ld\n",
+          func, "GRIDFTP_CEPH_READ_SIZE", blksize);
+  } 
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: block_size: %ld\n",
                          func,ceph_handle->block_size);
 
@@ -724,8 +949,7 @@ static globus_bool_t globus_l_gfs_ceph_send_next_to_client
                                          &ceph_handle->blk_offset,
                                          &ceph_handle->blk_length);
     if(ceph_handle->blk_length == 0) {
-      result = GLOBUS_SUCCESS;
-      globus_ceph_close(func, ceph_handle, ckSumbuf, NULL);
+      globus_ceph_close(func, ceph_handle, NULL);
       if (ceph_handle->outstanding == 0) {
         globus_gridftp_server_finished_transfer(ceph_handle->op,
                                                 ceph_handle->cached_res);
@@ -744,9 +968,7 @@ static globus_bool_t globus_l_gfs_ceph_send_next_to_client
                                     SEEK_SET);
   /* verify that it worked */
   if (start_offset != ceph_handle->blk_offset) {
-    result = globus_l_gfs_make_error("seek");
-    globus_ceph_close(func, ceph_handle, NULL, "failed to seek");
-    ceph_handle->cached_res = result;
+    globus_ceph_close(func, ceph_handle, "failed to seek");
     if (ceph_handle->outstanding == 0) {
       globus_gridftp_server_finished_transfer(ceph_handle->op,
                                               ceph_handle->cached_res);
@@ -756,9 +978,7 @@ static globus_bool_t globus_l_gfs_ceph_send_next_to_client
 
   buffer = globus_malloc(read_length);
   if (buffer == NULL) {
-    result = GlobusGFSErrorGeneric("error: malloc failed");
-    globus_ceph_close(func, ceph_handle, NULL, "malloc failed");
-    ceph_handle->cached_res = result;
+    globus_ceph_close(func, ceph_handle, "internal error (malloc failed)");
     if (ceph_handle->outstanding == 0) {
       globus_gridftp_server_finished_transfer(ceph_handle->op,
                                               ceph_handle->cached_res);
@@ -777,7 +997,7 @@ static globus_bool_t globus_l_gfs_ceph_send_next_to_client
 
     if (ceph_handle->checksum_list_p->next==NULL) {
       globus_free(buffer);
-      globus_ceph_close(func, ceph_handle, NULL, "malloc error");
+      globus_ceph_close(func, ceph_handle, "internal error (malloc failed)");
       if (ceph_handle->outstanding == 0) {
         globus_gridftp_server_finished_transfer(ceph_handle->op,
                                                 ceph_handle->cached_res);
@@ -801,11 +1021,11 @@ static globus_bool_t globus_l_gfs_ceph_send_next_to_client
                                              sizeof(checksum_block_list_t*));
     if (checksum_array==NULL){
       free_checksum_list(ceph_handle->checksum_list);
+      globus_ceph_close(func, ceph_handle, "internal error (malloc failed)");
       if (ceph_handle->outstanding == 0) {
         globus_gridftp_server_finished_transfer(ceph_handle->op,
                                                 ceph_handle->cached_res);
       }
-      globus_ceph_close(func, ceph_handle, NULL, "malloc error");
       return ceph_handle->done;
     }
     checksum_list_pp=ceph_handle->checksum_list;
@@ -835,7 +1055,7 @@ static globus_bool_t globus_l_gfs_ceph_send_next_to_client
                                      "user.checksum.type",
                                      ckSumnamedisk,
                                      CA_MAXCKSUMNAMELEN);
-      if (-1 == xattr_len) {
+      if (xattr_len < 0) {
         /* no error messages */
         useCksum = 0;
       } else {
@@ -853,7 +1073,7 @@ static globus_bool_t globus_l_gfs_ceph_send_next_to_client
           }
           char errorBuf[1024];
           sprintf(errorBuf, "error detected while reading checksum for fd: %d, errono=%d\n", ceph_handle->fd, -xattr_len);
-          globus_ceph_close(func, ceph_handle, NULL, errorBuf);
+          globus_ceph_close(func, ceph_handle, errorBuf);
           return ceph_handle->done;
         } else {
           ckSumbufdisk[xattr_len] = '\0';
@@ -874,13 +1094,13 @@ static globus_bool_t globus_l_gfs_ceph_send_next_to_client
                 ckSumbufdisk,
                 ckSumbuf);
         /* to do something in error case */
+        globus_ceph_close(func, ceph_handle, errorBuf);
         ceph_handle->cached_res =
           globus_error_put (globus_object_construct (GLOBUS_ERROR_TYPE_BAD_DATA));
         if (ceph_handle->outstanding == 0) {
           globus_gridftp_server_finished_transfer(ceph_handle->op,
                                                   ceph_handle->cached_res);
         }
-        globus_ceph_close(func, ceph_handle, NULL, errorBuf);
         return ceph_handle->done;
       }
     } else {
@@ -888,7 +1108,7 @@ static globus_bool_t globus_l_gfs_ceph_send_next_to_client
                              "%s: ADLER32 checksum has not been found in extended attributes\n",
                              func);
     }
-    globus_ceph_close(func, ceph_handle, ckSumbuf, NULL);
+    globus_ceph_close(func, ceph_handle, NULL);
     if (ceph_handle->outstanding == 0) {
       globus_gridftp_server_finished_transfer(ceph_handle->op,
                                               ceph_handle->cached_res);
@@ -897,10 +1117,8 @@ static globus_bool_t globus_l_gfs_ceph_send_next_to_client
     return ceph_handle->done;
   }
   if (nbread < 0) { /* error */
-    result = globus_l_gfs_make_error("read");
     globus_free(buffer);
-    globus_ceph_close(func, ceph_handle, NULL, "error reading from disk");
-    ceph_handle->cached_res = result;
+    globus_ceph_close(func, ceph_handle, "error reading from disk");
     if (ceph_handle->outstanding == 0) {
       globus_gridftp_server_finished_transfer(ceph_handle->op,
                                               ceph_handle->cached_res);
@@ -931,7 +1149,7 @@ static globus_bool_t globus_l_gfs_ceph_send_next_to_client
 
   if(res != GLOBUS_SUCCESS) {
     globus_free(buffer);
-    globus_ceph_close(func, ceph_handle, NULL, "error writing to network");
+    globus_ceph_close(func, ceph_handle, "error writing to network");
     ceph_handle->cached_res = res;
     if (ceph_handle->outstanding == 0) {
       globus_gridftp_server_finished_transfer(ceph_handle->op,
@@ -967,7 +1185,7 @@ static void globus_l_gfs_net_write_cb(globus_gfs_operation_t op,
       globus_l_gfs_ceph_send_next_to_client(ceph_handle);
     } else if (ceph_handle->outstanding == 0) {
       /* this is a read, we don't care about the checksum */
-      globus_ceph_close(func, ceph_handle, "0", NULL);
+      globus_ceph_close(func, ceph_handle, NULL);
       globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,"%s: finished transfer\n",func);
       globus_gridftp_server_finished_transfer(op, ceph_handle->cached_res);
     }
@@ -1014,6 +1232,10 @@ GlobusExtensionDefineModule(globus_gridftp_server_ceph) = {
   NULL
 };
 
+
+
+
+
 /*
  *  no need to change this
  */
@@ -1025,7 +1247,9 @@ static int globus_l_gfs_ceph_activate(void) {
   // initialize ceph wrapper log
   ceph_posix_set_logfunc(ceph_logfunc_wrapper);
   // setup defaults from environment
-  ceph_posix_set_defaults(getenv("GRIDFTP_CEPH_DEFAULTS"));
+//  ceph_posix_set_defaults(getenv("GRIDFTP_CEPH_DEFAULTS"));
+  
+
   return 0;
 }
 
