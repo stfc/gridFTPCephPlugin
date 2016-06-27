@@ -22,14 +22,12 @@
 #include <limits.h>
 
 #include "globus_gridftp_server.h"
-//#include "globus-server-include/globus_i_gfs_acl.h"
-//#include "globus-server-include/globus_i_gfs_data.h"
-//#include "/usr/include/globus/globus_ftp_control.h"
-//#include "globus_types.h"
+
 #include "dsi_ceph.h"
 #include "ceph_posix.h"
-//#include <gssapi.h>
-//#include <stdlib.h>
+
+#include "gridftp_authz.h"
+
 
 #define  CA_MAXCKSUMLEN 32
 #define  CA_MAXCKSUMNAMELEN 15
@@ -42,6 +40,7 @@ globus_version_t local_version = {
   0 /* branch ID */
 };
 
+static char* username;
 /*
  * Utility function to get an integer value from the environment
  */
@@ -206,11 +205,12 @@ static void globus_l_gfs_ceph_start(globus_gfs_operation_t op,
                          func, getuid(),getgid());
   globus_mutex_init(&ceph_handle->mutex,NULL);
   
-  globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: host_id = %s\n",
-                         func, session_info->host_id);  
+  globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: host_id = %s, username = %s\n",
+                         func, session_info->host_id, session_info->username);  
   ceph_posix_set_username(session_info->username);
-   
-
+  
+  username = strdup(session_info->username);
+ 
   memset(&finished_info, '\0', sizeof(globus_gfs_finished_info_t));
   finished_info.type = GLOBUS_GFS_OP_SESSION_START;
   finished_info.result = GLOBUS_SUCCESS;
@@ -220,6 +220,15 @@ static void globus_l_gfs_ceph_start(globus_gfs_operation_t op,
   ceph_handle->checksum_list=NULL;
   ceph_handle->checksum_list_p=NULL;
   globus_gridftp_server_operation_finished(op, GLOBUS_SUCCESS, &finished_info);
+  
+  
+  globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: leaving.\n",
+                         func);  
+  
+//  if (ceph_authz_init(session_info->username)) {
+//    globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: authZ initialised OK.\n",
+//                         func);     
+//  }
    
 }
 
@@ -260,11 +269,55 @@ static void globus_l_gfs_ceph_stat(globus_gfs_operation_t op,
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s: %s\n",
                          func, stat_info->pathname);
   
-  char *realpath = strdup(stat_info->pathname);
+//  char *realpath = strdup(stat_info->pathname);
+  
+  
+  int allowed = checkaccess("/opt/xrd/etc/Authfile", 500, username, "rd", stat_info->pathname);
 
-  if (strcmp("/", realpath) != 0) {
+  if (!allowed) {
+    result = GlobusGFSErrorGeneric("globus_l_gfs_ceph_stat: acc.error: 'rd' operation not allowed");
+    globus_gridftp_server_finished_stat(op, result, NULL, 0);
+    return;
+  } else {
+    globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+          "globus_l_gfs_ceph_stat: %s: acc.success: 'rd' operation allowed\n", func);
+  }  
+  
+  
 
-    status = ceph_posix_stat64(realpath, &statbuf);
+  if (!strcmp("/", stat_info->pathname))   {    // FTS needs some hand-holding
+    
+    globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
+        "%s: Looks like a stat on '/' for %s.\n", __FUNCTION__, stat_info->pathname);
+    
+    // Sometimes, the FTS client will send a 'MLST /' command when the target doesn't exist
+    // The particular conditions under which this can happen are as yet unclear
+    stat_count = 1;
+    statbuf.st_uid = 0;
+    statbuf.st_gid = 0;
+    statbuf.st_mode = __S_IFDIR|0666;
+    statbuf.st_size = 0;
+    statbuf.st_atime = 0;
+    statbuf.st_ctime = 0;
+    statbuf.st_mtime = 0;
+    stat_array = (globus_gfs_stat_t *) globus_calloc(1, sizeof (globus_gfs_stat_t));
+    if (stat_array == NULL) {
+      result = GlobusGFSErrorGeneric("error: memory allocation failed");
+      globus_gridftp_server_finished_stat(op, result, NULL, 0);
+      return;
+    }
+    stat_count = 1;
+    fill_stat_array(&(stat_array[0]), statbuf, stat_info->pathname);
+    globus_gridftp_server_finished_stat(op, GLOBUS_SUCCESS, stat_array, stat_count);
+    free_stat_array(stat_array, stat_count);
+    globus_free(stat_array);
+    
+  } else {     // It's a proper objectname
+ 
+    globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
+        "%s: Looks like a stat on a sensible objectpath for %s.\n", __FUNCTION__, stat_info->pathname);    
+    
+    status = ceph_posix_stat64(stat_info->pathname, &statbuf);
 
     if (status != 0) {
       globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
@@ -284,32 +337,11 @@ static void globus_l_gfs_ceph_stat(globus_gfs_operation_t op,
       return;
     }
     stat_count = 1;
-    fill_stat_array(&(stat_array[0]), statbuf, realpath /* stat_info->pathname */);
+    fill_stat_array(&(stat_array[0]), statbuf, stat_info->pathname /* stat_info->pathname */);
     globus_gridftp_server_finished_stat(op, GLOBUS_SUCCESS, stat_array, stat_count);
     free_stat_array(stat_array, stat_count);
     globus_free(stat_array);
 
-  } else { // Sometimes, the FTS client will send a 'MLST /' command when the target doesn't exist
-           // The particular conditions under which this can happen are as yet unclear
-    stat_count = 1;
-    statbuf.st_uid = 0;
-    statbuf.st_gid = 0;
-    statbuf.st_mode = __S_IFDIR|0666;
-    statbuf.st_size = 0;
-    statbuf.st_atime = 0;
-    statbuf.st_ctime = 0;
-    statbuf.st_mtime = 0;
-    stat_array = (globus_gfs_stat_t *) globus_calloc(1, sizeof (globus_gfs_stat_t));
-    if (stat_array == NULL) {
-      result = GlobusGFSErrorGeneric("error: memory allocation failed");
-      globus_gridftp_server_finished_stat(op, result, NULL, 0);
-      return;
-    }
-    stat_count = 1;
-    fill_stat_array(&(stat_array[0]), statbuf, realpath /* stat_info->pathname */);
-    globus_gridftp_server_finished_stat(op, GLOBUS_SUCCESS, stat_array, stat_count);
-    free_stat_array(stat_array, stat_count);
-    globus_free(stat_array);
   }
   
   return;
@@ -414,6 +446,11 @@ int ceph_handle_open(char *path,
   char *    func="ceph_handle_open";
 
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: %s\n", func, path);
+  
+  
+  if (path[0] == '/') {   // Get rid of that darn 
+    path++;
+  }
   rc = ceph_posix_open(path, flags, mode);
   ceph_handle->fileSize = 0;
   return (rc);
@@ -444,7 +481,7 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
 
   if (!strcmp(getdebug(), "1")){
     if (reported_nbytes == 0) {
-      globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,"%s: start, offset =%lld, nbytes= %d\n", func, offset, nbytes);
+      globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,"%s: start, offset = %lld, nbytes = %d\n", func, offset, nbytes);
     reported_nbytes = 1;
     }
   }
@@ -671,6 +708,10 @@ static void globus_l_gfs_ceph_read_from_net
                                                 ceph_handle->cached_res);
       }
       return;
+    } else {
+//      globus_gfs_log_message(GLOBUS_GFS_LOG_ERR,
+//                             "%s: register read OK\n",
+//                             func);      
     }
     ceph_handle->outstanding++;
   }
@@ -705,15 +746,39 @@ static void globus_l_gfs_ceph_recv(globus_gfs_operation_t op,
   GlobusGFSName(globus_l_gfs_ceph_recv);
   ceph_handle = (globus_l_gfs_ceph_handle_t *) user_arg;
 
-  globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: started\n",func);
+  globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+          "%s: started for %s\n", func, transfer_info->pathname);
+  
+    globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+          "%s: username is %s\n", func, username);
+  
+//    globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+//          "%s: username = %s\n", func, username); 
+
+  int allowed = checkaccess("/opt/xrd/etc/Authfile", 500, username, "wr", transfer_info->pathname);
+   
+  if (!allowed) {
+    result = GlobusGFSErrorGeneric("acc.error: 'wr' operation not allowed");
+    globus_gridftp_server_finished_transfer(op, result);
+    return;
+  } else {
+    globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+          "%s: acc.success: 'wr' operation  allowed\n", func);
+  }
 
   pathname=strdup(transfer_info->pathname);
   if(pathname==NULL) {
-    result=GlobusGFSErrorGeneric("error: strdup failed");
+    result = GlobusGFSErrorGeneric("error: strdup failed");
     globus_gridftp_server_finished_transfer(op, result);
     return;
   }
-  globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: pathname: %s \n",func,pathname);
+  
+//  if (pathname[0] == '/') {   // Get rid of that darn 
+//    pathname++;
+//  }  
+  
+  
+  globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: pathname now: %s \n",func,pathname);
   globus_size_t block_size;
   globus_gridftp_server_get_block_size(op, &block_size);
 
@@ -726,7 +791,12 @@ static void globus_l_gfs_ceph_recv(globus_gfs_operation_t op,
   int rc = ceph_posix_stat64(pathname, &sbuf);
   
   flags = O_WRONLY | O_CREAT;
+  
+  /*
+   * The following should be a configuration option, or removed.
+   */
   int allow_overwrite = 1;
+  
   if (rc == 0) { // File exists
     
     if (allow_overwrite == 1) {
@@ -835,10 +905,15 @@ static void globus_l_gfs_ceph_send(globus_gfs_operation_t op,
   globus_bool_t                       done;
   globus_result_t                     result;
   
+  char * operation = "rd";
+  
   GlobusGFSName(globus_l_gfs_ceph_send);
   ceph_handle = (globus_l_gfs_ceph_handle_t *) user_arg;
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: started\n",func);
-
+  
+  globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+        "%s: username is %s\n", func, username);
+  
   pathname=strdup(transfer_info->pathname);
   if (pathname == NULL) {
     result = GlobusGFSErrorGeneric("error: strdup failed");
@@ -847,6 +922,17 @@ static void globus_l_gfs_ceph_send(globus_gfs_operation_t op,
   }
 
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: pathname: %s\n",func,pathname);
+  
+  int allowed = checkaccess("/opt/xrd/etc/Authfile", 500, username, "rd", transfer_info->pathname);
+
+  if (!allowed) {
+    result = GlobusGFSErrorGeneric("acc.error: 'rd' operation not allowed");
+    globus_gridftp_server_finished_transfer(op, result);
+    return;
+  } else {
+    globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+          "%s: acc.success: 'rd' operation  allowed\n", func);
+  }  
   
   /* Check whether the file exists before going any further */
   struct stat64 sbuf;
@@ -1246,6 +1332,8 @@ static int globus_l_gfs_ceph_activate(void) {
                                 &globus_l_gfs_ceph_dsi_iface);
   // initialize ceph wrapper log
   ceph_posix_set_logfunc(ceph_logfunc_wrapper);
+//  gftp_authz_set_logfunc(ceph_logfunc_wrapper);
+  
   // setup defaults from environment
 //  ceph_posix_set_defaults(getenv("GRIDFTP_CEPH_DEFAULTS"));
   

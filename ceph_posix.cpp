@@ -66,13 +66,13 @@ unsigned int g_nextCephFd = 0;
 /// global variable containing defaults for CephFiles
 CephFile g_defaultParams = { "",
                              "default",        // default pool
-                             "admin",          // default user
+                             "xrootd",          // default user
                              1,                // default nbStripes
                              4 * 1024 * 1024,  // default stripeUnit : 4 MB
                              4 * 1024 * 1024}; // default objectSize : 4 MB
 
-std::string g_defaultUserId = "admin";
-std::string g_defaultPool = "default";
+//std::string g_defaultUserId = "xrootd";
+//std::string g_defaultPool = "default";
 
 /// global variable for the log function
 static void (*g_logfunc) (char *, va_list argp) = 0;
@@ -304,7 +304,7 @@ static int fillCephUserId(const std::string &params, CephFile &file) {
   if (std::string::npos != atPos) {
     file.userId = params.substr(0, atPos);
     
-    if (!strcmp(getdebug(), "9")) {
+    if (!strcmp(getdebug(), "1")) {
       logwrapper((char*)"%s : userId = %s\n", __FUNCTION__, file.userId.c_str());
     }   
     return atPos+1;
@@ -490,10 +490,10 @@ void fillCephFileParams(const std::string &params, CephFile &file) {
 //  file.stripeUnit = stripeUnit;
 //  file.objectSize = objectSize;
  
-  if (!strcmp("9", getdebug())) {
-    logwrapper((char*)"%s : user= %s, pool= %s, nbStripes= %d, stripeUnit= %d, objectSize= %d\n", 
+  if (!strcmp("1", getdebug())) {
+    logwrapper((char*)"%s : saved_userID = %s, user= %s, pool= %s, nbStripes= %d, stripeUnit= %d, objectSize= %d\n", 
             __FUNCTION__, 
-            file.userId.c_str(), file.pool.c_str(), file.nbStripes, file.stripeUnit, file.objectSize);
+            saved_ceph_userId.c_str(), file.userId.c_str(), file.pool.c_str(), file.nbStripes, file.stripeUnit, file.objectSize);
   }   
   
 }
@@ -513,16 +513,16 @@ void fillCephFileParams(const std::string &params, CephFile &file) {
 /// sets the default userId, pool and file layout
 /// syntax is [user@]pool[,nbStripes[,stripeUnit[,objectSize]]]
 /// may throw std::invalid_argument or std::out_of_range in case of error
-void ceph_posix_set_defaults(const char* value) {
-  if (!strcmp("1", getdebug())) {
-    logwrapper((char*)"%s : value = %s\n", __FUNCTION__, value);
-  }
-  if (value) {
-    CephFile newdefault;
-    fillCephFileParams(value, newdefault);
-    g_defaultParams = newdefault;
-  }
-}
+//void ceph_posix_set_defaults(const char* value) {
+//  if (!strcmp("1", getdebug())) {
+//    logwrapper((char*)"%s : value = %s\n", __FUNCTION__, value);
+//  }
+//  if (value) {
+//    CephFile newdefault;
+//    fillCephFileParams(value, newdefault);
+//    g_defaultParams = newdefault;
+//  }
+//}
 
 /// fill a ceph file struct from a path
 void fillCephFile(const char *path, CephFile &file) {
@@ -531,15 +531,15 @@ void fillCephFile(const char *path, CephFile &file) {
     logwrapper((char*) "\n\n%s : path is '%s'\n", __FUNCTION__, path);
   }
   // Syntax of the given path is :
-  //   [[userId@]pool[,nbStripes[,stripeUnit[,objectSize]]]:]<actual path>
+  //   [/]pool[,nbStripes[,stripeUnit[,objectSize]]]:]<object name>
   // for the missing parts, defaults are applied. These defaults are
   // initially set to 'admin', 'default', 1, 4MB and 4MB
   // but can be changed via a call to ceph_posix_set_defaults
   std::string spath = path;
   size_t colonPos = spath.find(':');
-  if (std::string::npos == colonPos) {   
+  if (std::string::npos == colonPos) {   // No colon?
     file.name = spath;
-    if (!strcmp("9", getdebug())) {
+    if (!strcmp("1", getdebug())) {
       logwrapper((char*) "\n%s : about to call fillCephFileParams with empty string\n", __FUNCTION__);
     }   
     fillCephFileParams("", file);
@@ -547,21 +547,25 @@ void fillCephFile(const char *path, CephFile &file) {
       
     if (0 == spath.find('/')) {
         spath = spath.substr(1); // Remove slash before username in params
+//    }
+//    if (!strcmp("1", getdebug())) {
+//      logwrapper((char*) "\n%s : path is now '%s'\n", __FUNCTION__, spath.c_str());
     }
-    if (!strcmp("9", getdebug())) {
-      logwrapper((char*) "\n%s : apath is now %s\n", __FUNCTION__, spath.c_str());
-    }      
-    file.name = spath.substr(colonPos); // Ignore the slash after the colon in 'params:/path' 
-    if (!strcmp("9", getdebug())) {
-      logwrapper((char*) "\n\t%s : file.name = %s\n", "fillCephFile", file.name.c_str());
-      logwrapper((char*) "\n\t%s : remainder of params = %s\n", "fillCephFile", 
-        spath.substr(0, colonPos).c_str());
+    if (!strcmp("1", getdebug())) {
+     logwrapper((char*) "\n\n%s : path is '%s'\n", __FUNCTION__, path);
+    }   
+    colonPos = spath.find(':'); // Argh! When the leading slash isn't present, colonPos is off by one!
+    file.name = spath.substr(colonPos+1); 
+    
+    if (!strcmp("1", getdebug())) {
+      logwrapper((char*) "\n\t%s : file.name = '%s'\n", "fillCephFile", file.name.c_str());
+
     }
     std::string nparams = spath.substr(0, colonPos);
-    if (!strcmp("9", getdebug())) {
-      logwrapper((char*) "\n%s : about to call fillCephFileParams with %s, %s\n", __FUNCTION__, nparams.c_str());
+    if (!strcmp("1", getdebug())) {
+      logwrapper((char*) "\n%s : about to call fillCephFileParams with '%s'\n", __FUNCTION__, nparams.c_str());
     } 
-    fillCephFileParams(nparams /* spath.substr(0, colonPos) */ , file); // Don't pass the separating colon
+    fillCephFileParams(nparams, file); // Don't pass the separating colon
   }
 }
 
@@ -596,7 +600,7 @@ static libradosstriper::RadosStriper* getRadosStriper(const CephFile& file) {
 
   std::string userAtPool = getUserAtPool(file);
   
-  if (!strcmp("9", getdebug())) {
+  if (!strcmp("1", getdebug())) {
     logwrapper((char*) "%s : userId = %s, pool = %s, name = %s\n",
     __FUNCTION__, file.userId.c_str(), file.pool.c_str(), file.name.c_str());
         logwrapper((char*) "\n%s : userAtPool = %s\n", __FUNCTION__, userAtPool.c_str());
@@ -788,29 +792,31 @@ extern "C" {
       }
       saved_ceph_userId.assign(username);
     }
-
-   
-  int ceph_posix_delete(const char *pathname) {
+    
+int ceph_posix_delete(const char *pathname) {
     errno = 0;
     if (!strcmp(getdebug(), "1")) {
       logwrapper((char*) "%s : %s\n", __FUNCTION__, pathname);
-    }      
-    CephFileRef fr = getCephFileRef(pathname, 0, (mode_t)0, 0); // flags, mode, 0);
+    }
+    CephFileRef fr = getCephFileRef(pathname, 0, (mode_t) 0, 0); // flags, mode, 0);
     libradosstriper::RadosStriper *striper = getRadosStriper(fr);
     if (NULL == striper) {
       logwrapper((char*) "%s : Can't get striper\n", __FUNCTION__);
       errno = ENOENT;
       return -ENOENT;
     }
-     if (!strcmp(getdebug(), "9")) {
+    if (!strcmp(getdebug(), "9")) {
       logwrapper((char*) "%s : fr.name = %s\n", __FUNCTION__, fr.name.c_str());
-    }    
+    }
     int rc = striper->remove(fr.name);
     if (rc != 0) {
       logwrapper((char*) "%s : Can't delete %s, rc = %d\n", __FUNCTION__, fr.name.c_str(), rc);
       //errno = ENOENT;
       return rc;
-    }     
+    } else {
+      logwrapper((char*) "%s : delete OK for %s\n", __FUNCTION__, fr.name.c_str(), rc);
+
+    }
     return rc;
   }
         
@@ -948,6 +954,8 @@ extern "C" {
     // mode is set arbitrarily to 0666
 //    char *inpath = strdup(pathname);
     CephFile cephFile = getCephFile(pathname);
+        
+    (void)cephFile.name.c_str();
     
     libradosstriper::RadosStriper *striper = getRadosStriper(cephFile);    
     if (0 == striper) {    
@@ -955,11 +963,18 @@ extern "C" {
       return -errno;
     }
     memset(buf, 0, sizeof(*buf));
-        
+            
 //    int rc = searching_stat64(striper, &wanted, buf);
-    int rc = striper->stat(cephFile.name.c_str() /* pathname */, (uint64_t*)&(buf->st_size), &(buf->st_atime));
     
+
+    int rc = striper->stat(cephFile.name.c_str(), 
+            (uint64_t*)&(buf->st_size), &(buf->st_atime));
+        
     if (rc != 0) {
+      
+      logwrapper((char*)"%s : striper->stat returned %d for '%s'%s\n", __FUNCTION__, 
+              rc, cephFile.pool.c_str(), cephFile.name.c_str());
+
       // for non existing file. Check that we did not open it for write recently
       // in that case, we return 0 size and current time
       if (-ENOENT == rc) {
@@ -969,19 +984,27 @@ extern "C" {
           buf->st_atime = time(NULL);
           return rc; // Otherwise, we fall out, set the buf-> members, and return 0
         } else {
-          logwrapper((char*)"%s : File %s doesn't exist and isn't in g_filesOpenForWrite\n", __FUNCTION__, pathname);
+          logwrapper((char*)"%s : File %s doesn't exist and isn't in g_filesOpenForWrite\n", 
+                  __FUNCTION__, pathname);
           errno = -rc; // because striper->stat is negative for errors
           return rc;
         }
+      } else { // Some other error which (not ENOENT)
+          logwrapper((char*)"%s : return code from striper->stat = %d\n", 
+          __FUNCTION__, rc);
+          errno = -rc; // because striper->stat is negative for errors
+          return rc;
+        
       }
     }
-    if (!strcmp(getdebug(), "9")) {
-      logwrapper((char*)"%s : Found file %s OK\n", __FUNCTION__, cephFile.name.c_str());
-       
-    }
+     
+
+    logwrapper((char*)"%s : Found file %s OK\n", __FUNCTION__, cephFile.name.c_str());
+
     buf->st_mtime = buf->st_atime;
     buf->st_ctime = buf->st_atime;  
     buf->st_mode = 0666;
+          
     return 0;
     
   }
