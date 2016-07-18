@@ -17,10 +17,18 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-typedef struct  {
-  const char* user;
+    
+typedef struct  ppelem {
+  struct ppelem* next;
+
   const char* path;
   const char* priv;
+
+} ppelem_t;
+
+typedef struct {
+  const char* user;
+  ppelem_t * pp;
 } authdbentry;
 
 int checkallowed(const char *user, const char* operation, const char* path, authdbentry* rec);

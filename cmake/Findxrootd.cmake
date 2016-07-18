@@ -1,27 +1,25 @@
-# - Find ceph
+# - Find xrootd
 #
-# RADOS_INCLUDE_DIR        - location of the ceph-devel header files for rados
-# RADOS_LIBS               - list of rados libraries, with full path
+# XROOTD_INCLUDE_DIR        - location of the header files for xrootd
+# XROOTD_LIBS               - list of xrootd libraries, with full path
 #
 
-# Be silent if CEPH_INCLUDE_DIR is already cached
-if (RADOS_INCLUDE_DIR)
-  set(RADOS_FIND_QUIETLY TRUE)
-endif (RADOS_INCLUDE_DIR)
+# Be silent if XROOTD is already cached
+if (XROOTD_INCLUDE_DIR)
+  set(XROOTDFIND_QUIETLY TRUE)
+endif (XROOTD_INCLUDE_DIR)
 
-find_path (RADOS_INCLUDE_DIR NAMES radosstriper/libradosstriper.hpp
-  PATH_SUFFIXES include/radosstriper
-)
+find_path (XROOTD_INCLUDE_DIR NAME xrootd) 
 
-find_library (RADOSSTRIPER_LIB radosstriper)
-find_library (RADOS_LIB rados)
-set(RADOS_LIBS ${RADOS_LIB} ${RADOSSTRIPER_LIB})
+find_library (XROOTDSERVER_LIB XrdServer)
+find_library (XROOTDUTILS_LIB XrdUtils)
+set (XROOTD_LIBS ${XROOTDSERVER_LIB} ${XROOTDUTILS_LIB})
 
-message (STATUS "RADOS_INCLUDE_DIR        = ${RADOS_INCLUDE_DIR}")
-message (STATUS "RADOS_LIBS               = ${RADOS_LIBS}")
+message (STATUS "XROOTD_INCLUDE_DIR        = ${XROOTD_INCLUDE_DIR}")
+message (STATUS "XROOTD_LIBS               = ${XROOTD_LIBS}")
 
 include (FindPackageHandleStandardArgs)
-find_package_handle_standard_args (ceph DEFAULT_MSG 
-  RADOS_INCLUDE_DIR
-  RADOS_LIBS)
+find_package_handle_standard_args (xrootd DEFAULT_MSG 
+  XROOTD_INCLUDE_DIR
+  XROOTD_LIBS)
 
