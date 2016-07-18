@@ -25,9 +25,7 @@ cmake_minimum_required (VERSION 2.6)
 set (CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 find_package (globus REQUIRED)
 find_package (ceph REQUIRED)
-find_package (xrootd REQUIRED)
-
-include_directories(${PROJECT_SOURCE_DIR} ${RADOS_INCLUDE_DIR})
+include_directories(${PROJECT_SOURCE_DIR} ${RADOS_INCLUDE_DIR} )
 
 execute_process (COMMAND uname -m OUTPUT_VARIABLE GLOBUS_UNAME)
 string (REGEX REPLACE "\n" "" GLOBUS_UNAME ${GLOBUS_UNAME})
@@ -41,12 +39,16 @@ endif ()
 
 message (STATUS "GLOBUS_MOPTION = ${GLOBUS_MOPTION}")
 
-include_directories(${GLOBUS_CONFINC_PATH} ${GLOBUS_INC_PATH})
+include_directories(${GLOBUS_CONFINC_PATH} ${GLOBUS_INC_PATH} )
+# ${XROOTD_PATH})
+
+#message (XROOTD_LIBS "${XROOTD_LIBS}")
 
 set_property (SOURCE globus_gridftp_server_ceph.c
   PROPERTY COMPILE_FLAGS "${GLOBUS_MOPTION}")
 add_library (globus_gridftp_server_ceph SHARED
-  globus_gridftp_server_ceph.c ceph_posix.cpp)
+  globus_gridftp_server_ceph.c ceph_posix.cpp gridftp_authz.c)
 target_link_libraries(globus_gridftp_server_ceph ${RADOS_LIBS})
+#  ${XROOTD_LIBS})
 set_target_properties (globus_gridftp_server_ceph PROPERTIES
   LINK_FLAGS "${GLOBUS_FTPLIB} -lz")
