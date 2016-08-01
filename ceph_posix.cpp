@@ -529,10 +529,10 @@ void fillCephFileParams(const std::string &params, CephFile &file) {
 void fillCephFile(const char *path, CephFile &file) {
        
   if (!strcmp("9", getdebug())) {
-    logwrapper((char*) "\n\n%s : path is '%s'\n", __FUNCTION__, path);
+    logwrapper((char*) "%s : path is '%s'\n", __FUNCTION__, path);
   }
   // Syntax of the given path is :
-  //   [/]pool[,nbStripes[,stripeUnit[,objectSize]]]:]<object name>
+  //   [/]pool@[,nbStripes[,stripeUnit[,objectSize]]]:]<object name>
   // for the missing parts, defaults are applied. These defaults are
   // initially set to 'admin', 'default', 1, 4MB and 4MB
   // but can be changed via a call to ceph_posix_set_defaults
@@ -541,19 +541,13 @@ void fillCephFile(const char *path, CephFile &file) {
   if (std::string::npos == colonPos) {   // No colon?
     file.objectname = spath;
     if (!strcmp("1", getdebug())) {
-      logwrapper((char*) "\n%s : about to call fillCephFileParams with empty string\n", __FUNCTION__);
+      logwrapper((char*) "%s : about to call fillCephFileParams with empty string\n", __FUNCTION__);
     }   
     fillCephFileParams("", file);
   } else {
       
-//    if (0 == spath.find('/')) {
-//        spath = spath.substr(1); // Remove slash before path in params - NO!
-//    }
-//    if (!strcmp("1", getdebug())) {
-//      logwrapper((char*) "\n%s : path is now '%s'\n", __FUNCTION__, spath.c_str());
-//    }
     if (!strcmp("1", getdebug())) {
-     logwrapper((char*) "\n\n%s : path is '%s'\n", __FUNCTION__, path);
+     logwrapper((char*) "%s : path is '%s'\n", __FUNCTION__, path);
     }   
     colonPos = spath.find(':'); // Argh! When the leading slash isn't present, colonPos is off by one!
     file.objectname = spath.substr(colonPos+1); 
@@ -563,8 +557,8 @@ void fillCephFile(const char *path, CephFile &file) {
 
     }
     std::string nparams = spath.substr(0, colonPos);
-    if (!strcmp("1", getdebug())) {
-      logwrapper((char*) "\n%s : about to call fillCephFileParams with '%s'\n", __FUNCTION__, nparams.c_str());
+    if (!strcmp("9", getdebug())) {
+      logwrapper((char*) "%s : about to call fillCephFileParams with '%s'\n", __FUNCTION__, nparams.c_str());
     } 
     fillCephFileParams(nparams, file); // Don't pass the separating colon
   }
@@ -598,23 +592,29 @@ std::string getUserAtPool(const CephFile& file){
   return ss.str();
 }
 static libradosstriper::RadosStriper* getRadosStriper(const CephFile& file) {
+  
+  static int parameters_reported = 0;
 
   std::string userAtPool = getUserAtPool(file);
-  
+
   if (!strcmp("1", getdebug())) {
-    logwrapper((char*) "%s : userId = %s, pool = %s, name = %s\n",
-    __FUNCTION__, file.radosUserId.c_str(), file.pool.c_str(), file.objectname.c_str());
-        logwrapper((char*) "\n%s : userAtPool = %s\n", __FUNCTION__, userAtPool.c_str());
+
+    if (!parameters_reported++) {
+      logwrapper((char*) "%s : userId = %s, pool = %s, name = %s\n",
+              __FUNCTION__, file.radosUserId.c_str(), file.pool.c_str(), file.objectname.c_str());
+      logwrapper((char*) "%s : userAtPool = %s\n", __FUNCTION__, userAtPool.c_str());
+
+    }
   }  
   
   std::map<std::string, libradosstriper::RadosStriper*>::iterator it =
     g_radosStripers.find(userAtPool);
   if (!strcmp("9", getdebug())) {  
-    logwrapper((char*) "\n%s : back from radosStripers.find\n", __FUNCTION__);
+    logwrapper((char*) "%s : back from radosStripers.find\n", __FUNCTION__);
   }
   if (it == g_radosStripers.end()) {
     if (!strcmp("9", getdebug())) {  
-      logwrapper((char*) "\n%s : need to create a new radosStriper.\n", __FUNCTION__);
+      logwrapper((char*) "%s : need to create a new radosStriper.\n", __FUNCTION__);
     }      
     // we need to create a new radosStriper
     // Do we already have a cluster
@@ -622,25 +622,25 @@ static libradosstriper::RadosStriper* getRadosStriper(const CephFile& file) {
       // create connection to cluster
       g_cluster = new librados::Rados;
       if (!strcmp("9", getdebug())) {  
-        logwrapper((char*) "\n%s : back from creating librados::Rados\n", __FUNCTION__);
+        logwrapper((char*) "%s : back from creating librados::Rados\n", __FUNCTION__);
       }      
       if (0 == g_cluster) {
         if ( !strcmp("9", getdebug()) ) {
-          logwrapper((char*)"%s : cluster from new librados::Rados = 0\n", __FUNCTION__);
+          logwrapper((char*) "%s : cluster from new librados::Rados = 0\n", __FUNCTION__);
         }
         return 0;
       } else {
         if (!strcmp("9", getdebug())) {  
-          logwrapper((char*) "\n%s : g_cluster is non-zero\n", __FUNCTION__);
+          logwrapper((char*) "%s : g_cluster is non-zero\n", __FUNCTION__);
         }
       }
       if ( !strcmp("9", getdebug()) ) {
-        logwrapper((char*)"%s : About to g_cluster->init\n", __FUNCTION__);
+        logwrapper((char*) "%s : About to g_cluster->init\n", __FUNCTION__);
       }      
       int rc = g_cluster->init(file.radosUserId.c_str());
       if (rc) {
         if ( !strcmp("1", getdebug()) ) {
-          logwrapper((char*)"%s : cannot g_cluster->init('%s')\n", __FUNCTION__, file.radosUserId.c_str());
+          logwrapper((char*) "%s : cannot g_cluster->init('%s')\n", __FUNCTION__, file.radosUserId.c_str());
         }
         delete g_cluster;
         g_cluster = 0;
@@ -649,7 +649,7 @@ static libradosstriper::RadosStriper* getRadosStriper(const CephFile& file) {
       rc = g_cluster->conf_read_file(NULL);
       if (rc) {
         if ( !strcmp("1", getdebug()) ) {
-          logwrapper((char*)"%s : cannot cluster->conf_read_file(NULL)\n", __FUNCTION__);
+          logwrapper((char*) "%s : cannot cluster->conf_read_file(NULL)\n", __FUNCTION__);
         }
         g_cluster->shutdown();
         delete g_cluster;
@@ -749,11 +749,11 @@ static libradosstriper::RadosStriper* getRadosStriper(const CephFile& file) {
                                 (userAtPool, striper)).first;
   } else {
     if (!strcmp("9", getdebug())) {  
-      logwrapper((char*) "\n%s : Not at end of g_stripers, already have a radosStriper.\n", __FUNCTION__);
+      logwrapper((char*) "%s : Not at end of g_stripers, already have a radosStriper.\n", __FUNCTION__);
     }    
   }
   if (!strcmp("0", getdebug())) {  
-    logwrapper((char*) "\n%s : returning a radosStriper for %s.\n", __FUNCTION__, it->first.c_str());
+    logwrapper((char*) "%s : returning a radosStriper for %s.\n", __FUNCTION__, it->first.c_str());
   }  
   return it->second;
 }
@@ -900,10 +900,9 @@ int ceph_posix_delete(const char *pathname) {
       bl.append((const char*)buf, count);      
       int rc = striper->write(fr.objectname, bl, count, fr.offset);
 #ifdef TRACE_WRITES    
-      if (!blocksize_reported) {
+      if (!blocksize_reported++) {
         logwrapper((char*)"%s : \n\t\t\tstriper->write(%s:%s, %d, offset= %lld) = %d\n",
               __FUNCTION__, fr.pool.c_str(), fr.objectname.c_str(), count, fr.offset, rc);
-        blocksize_reported = 1;       
       }
 #endif      
       if (rc != 0) 
@@ -922,9 +921,8 @@ int ceph_posix_delete(const char *pathname) {
     if (it != g_fds.end()) {
       CephFileRef &fr = it->second;
 #ifdef LOWLEVELTRACE  
-      if (reported_size == 0) {
+      if (!reported_size++) {
         logwrapper((char*)"%s: for fd %d, count=%d\n", __FUNCTION__, fd, count);
-        reported_size = 1;
       }
 #endif      
       if ((fr.flags & O_WRONLY) != 0) {

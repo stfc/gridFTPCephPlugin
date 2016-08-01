@@ -1,184 +1,176 @@
-/******************************************************************************
- * A thin layer around the XRootD XrdAcc Authorization framework
- * 
- * @author Ian Johnson, ian.johnson@stfc.ac.uk
- *****************************************************************************/
-
-
-#include "XrdVersion.hh"
-
-#include <XrdSec/XrdSecEntity.hh>
-
-#include "XrdAcc/XrdAccAuthorize.hh"
-
-#include "XrdSys/XrdSysHeaders.hh"
-#include "XrdSys/XrdSysLogger.hh"
-
-#include "gftp_authz.h"
-
+#include <cstdlib>
+#include <list>
+#include <iostream>     // std::cerr
+#include <fstream>      // std::ifstream
+#include <ctype.h>
 #include <string.h>
+#include <exception>
 
-std::string saved_authz_userId; // should this be static?
+using namespace std;
 
+typedef struct pathAndPrivilege {
+  std::string* path;
+  std::string* priv;
 
-/// global variable for the log function
-static void (*g_logfunc) (char *, va_list argp) = 0;
+} pathAndPrivilege_t, *pathAndPrivilege_p;
 
-static void logwrapper(char* format, ...) {
-  if (0 == g_logfunc) return;
-  va_list arg;
-  va_start(arg, format);
-  (*g_logfunc)(format, arg);
-  va_end(arg);
-}
+typedef struct authdbentry {
+  std::string* user;
+  std::list<pathAndPrivilege_p> pp;
 
-void gftp_authz_set_logfunc(void (*logfunc) (char *, va_list argp)) {
-  g_logfunc = logfunc;
-};
+} authdbentry_t, *authdbentry_p;
 
-  
-/******************************************************************************/
-/*                       O p e r a t i o n   T a b l e                        */
+std::list<pathAndPrivilege_p>& getPathsAndPrivs(const char* delim) throw (exception) {
 
-/******************************************************************************/
-typedef struct {
-  const char *opname;
-  Access_Operation oper;
-} optab_t;
-optab_t optab[] ={
-  {"?", AOP_Any},
-  {"cm", AOP_Chmod},
-  {"co", AOP_Chown},
-  {"cr", AOP_Create},
-  {"rm", AOP_Delete},
-  {"lk", AOP_Lock},
-  {"mk", AOP_Mkdir},
-  {"mv", AOP_Rename},
-  {"rd", AOP_Read},
-  {"ls", AOP_Readdir},
-  {"st", AOP_Stat},
-  {"wr", AOP_Update}};
+  std::list<pathAndPrivilege_p> *pAndPlist = new std::list<pathAndPrivilege_p>;
 
-int opcnt = sizeof (optab) / sizeof (optab[0]);
+  do {
 
-/******************************************************************************/
-/*                                c m d 2 o p                                 */
+    const char* path = strtok(NULL, delim);
+    const char* priv = strtok(NULL, delim);
 
-/******************************************************************************/
+    if (path == NULL || priv == NULL) { // No more tokens (path/priv pairs)
 
-int cmd2op(const char *opname) {
-  int retval = -1;
-  for (int i = 0; i < opcnt; i++) {
-    
-    if (!strcmp(opname, optab[i].opname)) {
-      retval = optab[i].oper;
+      break; // Stop looking for path/priv pairs...
+
+    } else {
+
+      pathAndPrivilege_p pAndPListItem = new pathAndPrivilege;
+
+      pAndPListItem->path = new std::string(path);
+      pAndPListItem->priv = new std::string(priv);
+
+      pAndPlist->push_back(pAndPListItem);
+
     }
-    
-  }
-  cerr << "testaccess: Invalid operation - " << opname << endl;
-  //   exit(1);
-  return retval;
+
+  } while (1);
+
+  return *pAndPlist;
+
 }
 
+authdbentry_p tokenize(std::string line) throw (exception) {
 
+  authdbentry_p rec = new authdbentry;
 
+  const char* delim = " \t";
+  char*cline = (char*) line.c_str();
 
+  (void) strtok(cline, delim); // Throw away the first token, the idtype 'u'  
 
-extern char* getdebug();
+  const char* user = strtok(NULL, delim);
 
+  if (user == NULL) {
+    free(rec);
+    throw "Can't find user with strtok()";
+  } else {
+    rec->user = new std::string(user);
+  }
 
+  std::list<pathAndPrivilege_p> theList;
+  try {
+    theList = getPathsAndPrivs(delim);
+  } catch (exception& e) {
+    throw "Can't get list of paths and privileges";
+  }
 
+  rec->pp = theList;
+  return rec;
 
+}
 
+void printAuthdbEntry(std::ostream& out, authdbentry_p authdbline) {
+
+  out << " User: " << *(authdbline->user) << "\t";
+  std::list<pathAndPrivilege_p> theList = authdbline->pp;
+  for (std::list<pathAndPrivilege_p>::iterator list_iter = theList.begin();
+          list_iter != theList.end();
+          list_iter++) {
+    out << *((*list_iter)->path) << '\t' << *((*list_iter)->priv) << '\t';
+  }
+
+  out << endl;
+
+}
+
+int checkListItem(const char* operation, const char* path, std::list<pathAndPrivilege_p>::iterator list_iter) {
+
+  int isAllowed = 0;
+  const char* candidatePath = ((*list_iter)->path)->c_str();
+  const char* candidatePriv = ((*list_iter)->priv)->c_str();
+        
+  if (strstr(path, candidatePath) == path) { // Test that request path starts with path from AuthDB 
+
+#define READ(operation) !strcmp("rd", operation)
+#define ALLACCESS(priv) !strcmp("a", priv)
+
+    isAllowed = READ(operation) or ALLACCESS(candidatePriv);
+  }
+
+  return isAllowed;
+
+}
+
+int checkAllowed(const char* operation, const char* path, std::list<pathAndPrivilege_p> pp) {
+
+  int isAllowed = 0;
+
+  for (std::list<pathAndPrivilege_p>::iterator
+    list_iter = pp.begin();
+    list_iter != pp.end();
+    list_iter++) {
+
+    if (isAllowed = checkListItem(operation, path, list_iter)) {
+      break;
+    }
+
+  }
+
+  return isAllowed;
+
+}
 
 extern "C" {
-  
-    void gftp_authz_set_username(const char* username) {
-    
-      if (!strcmp(getdebug(), "9")) {
-        logwrapper((char*) "%s : %s\n", __FUNCTION__, username);
-      }
-      saved_authz_userId.assign(username);
-    }
-  int gftp_authz_allow(const char* username, const char* path, const char* operation) {
 
-  
-    
-XrdSecEntity Entity("");
+  int checkAccess(const char* authdbfilename, const char* user, const char* operation, const char* path) {
 
-XrdAccAuthorize *Authorize;
+    ifstream authdbfile(authdbfilename);
 
-XrdSysLogger myLogger;
-XrdSysError eroute(&myLogger, "ceph_authz_");
-
-  logwrapper((char*)"%s : params = %s, %s, %s\n", __FUNCTION__, username, path, operation);
-
-    int retval = 0;
-    
-
-
-    /*
-     * Register the version number
-     */
-
-    static XrdVERSIONINFODEF(myVer, XrdAccTest, XrdVNUMBER, XrdVERSION);
-    extern XrdAccAuthorize * XrdAccDefaultAuthorizeObject(XrdSysLogger *lp,
-            const char *cfn,
-            const char *parm,
-            XrdVersionInfo & myVer);
-
-   
-    /*
-     * Create the XrdSecEntity object with the given user principal and a placeolder for host 
-     * We don't use host principals
-     */
-
-#define PROT "krb4"
-    
-    strncpy(Entity.prot, PROT, strlen(PROT));   // prot is a char[], host and name are char*]
-    Entity.host = (char *)"nohost";    
-    Entity.name = (char *)username;
-
-    
-    logwrapper((char*)"%s : Entity.name = %s\n", __FUNCTION__, Entity.name);
-
-//    return 1;
-    
-    //
-    // Don't need to specify a config file
-    // XrdServer library AuthDB file defaults to /opt/xrd/etc/Authfile
-    //
-
-    const char *emptyFilename = "/opt/xrd/etc/empty.cf";
-
-    /*
-     * Create the authZ object 
-     */
-    logwrapper((char*)"%s : About to create XrdAccDefaulatAuthorizeObject\n", __FUNCTION__);
-
-    if (!(Authorize = XrdAccDefaultAuthorizeObject(&myLogger, emptyFilename, 0, myVer))) {
-//      cerr << "acc authz_init: Initialization failed." << endl;
+    if (!authdbfile.is_open()) {
       return 0;
-    } else {
-//      retval = 1;
     }
 
- 
-    int optype = cmd2op(operation);
+    int isAllowed = 0;
 
-    if (optype != -1) {
-    logwrapper((char*)"%s : About to call Authorize->Access\n", __FUNCTION__);
+    try {
+      
+      std::string line;
 
-      XrdAccPrivs auth = Authorize->Access(
-              (const XrdSecEntity *) &Entity, (const char *) path, (Access_Operation)optype);
-      retval = auth;
+      while (getline(authdbfile, line) && !isAllowed) {
+
+#define IGNORE(str) (str[0] == '#' or str[0] == '\0' or isspace(str[0]))
+
+        if (IGNORE(line)) {
+          continue;
+        } else {
+
+          authdbentry * authdbline = tokenize(line);
+
+          if (!authdbline->user->compare(user)) { // User in AuthDB matches user in request
+            isAllowed = checkAllowed(operation, path, authdbline->pp);
+          }
+
+        }
+      } // while
+
+    } catch (exception& e) { // Could log the error message from the exception here
 
     }
 
-    return retval;
+    authdbfile.close();
+    return isAllowed;
 
   }
 
-
-} // extern "C"
-
+}

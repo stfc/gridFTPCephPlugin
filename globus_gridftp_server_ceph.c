@@ -213,7 +213,7 @@ static void globus_l_gfs_ceph_start(globus_gfs_operation_t op,
   ceph_handle = (globus_l_gfs_ceph_handle_t *)
     globus_malloc(sizeof(globus_l_gfs_ceph_handle_t));
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: started, uid: %u, gid: %u\n",
-                         func, getuid(),getgid());
+                         func, getuid(), getgid());
   globus_mutex_init(&ceph_handle->mutex,NULL);
   
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: host_id = %s, mapped username = %s\n",
@@ -311,6 +311,8 @@ static void globus_l_gfs_ceph_start(globus_gfs_operation_t op,
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: leaving.\n",
                          func);  
   
+  useAuthZ = 1;
+  
 }
 
 /*************************************************************************
@@ -353,7 +355,7 @@ static void globus_l_gfs_ceph_stat(globus_gfs_operation_t op,
 //  char *realpath = strdup(stat_info->pathname);
   
   
-  int allowed = checkaccess(authdbFile, 500, username, "rd", stat_info->pathname);
+  int allowed = checkAccess(authdbFile, username, "rd", stat_info->pathname);
 
   if (!allowed) {
     result = GlobusGFSErrorGeneric("globus_l_gfs_ceph_stat: authorization error: 'MLST' operation not allowed");
@@ -416,7 +418,7 @@ static void globus_l_gfs_ceph_stat(globus_gfs_operation_t op,
       return;
     }
     stat_count = 1;
-    fill_stat_array(&(stat_array[0]), statbuf, stat_info->pathname /* stat_info->pathname */);
+    fill_stat_array(&(stat_array[0]), statbuf, stat_info->pathname);
     globus_gridftp_server_finished_stat(op, GLOBUS_SUCCESS, stat_array, stat_count);
     free_stat_array(stat_array, stat_count);
     globus_free(stat_array);
@@ -464,7 +466,7 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
       "%s: DELETE %s\n", __FUNCTION__, cmd_info->pathname);
 
       if (useAuthZ) {
-        allowed = checkaccess(authdbFile, 500, username, "wr", cmd_info->pathname);
+        allowed = checkAccess(authdbFile, username, "wr", cmd_info->pathname);
 
         globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
           "%s: allowed = %d\n", __FUNCTION__, allowed);
@@ -523,7 +525,7 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
        */
 
       if (useAuthZ) {
-        allowed = checkaccess(authdbFile, 500, username, "wr", cmd_info->pathname);
+        allowed = checkAccess(authdbFile, username, "wr", cmd_info->pathname);
       } else {
         allowed = 1;
       }
@@ -544,6 +546,9 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
        * The core of GrdiFTP will return a '257 MKD <pathname> Pathname: Created Successfully message'
         * We don't need to do anything server-side.
        */    
+        ;
+        
+        
         globus_gridftp_server_finished_command(op, GLOBUS_SUCCESS, GLOBUS_NULL);
 
       }      
@@ -558,7 +563,7 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
     case GLOBUS_GFS_CMD_CKSM:
 
       if (useAuthZ) {
-        allowed = checkaccess(authdbFile, 500, username, "rd", cmd_info->pathname);
+        allowed = checkAccess(authdbFile, username, "rd", cmd_info->pathname);
       } else {
         allowed = 1;
       }
@@ -571,7 +576,7 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
       } else {
         if (useAuthZ) {
           globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
-          "authz .success: CHECKSUM operation  allowed\n");
+          "authz .success: CHECKSUM operation allowed\n");
         }
 
         //      cksm_alg = cmd_info->cksm_alg; // In case we support checksums other than ADLER32 in the future...
@@ -912,11 +917,11 @@ static void globus_l_gfs_ceph_recv(globus_gfs_operation_t op,
           "%s: started for %s\n", func, transfer_info->pathname);
   
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
-          "%s: username == %s, authdbfiles = %s\n", func, username, authdbFile);
+          "%s: username == %s, authdbfile = %s\n", func, username, authdbFile);
   
   if (useAuthZ) {
   
-  int allowed = checkaccess(authdbFile, 500, username, "wr", transfer_info->pathname);
+  int allowed = checkAccess(authdbFile, username, "wr", transfer_info->pathname);
    
   if (!allowed) {
     char *error = strerror(errno);
@@ -1085,8 +1090,7 @@ static void globus_l_gfs_ceph_send(globus_gfs_operation_t op,
 
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s: pathname: %s\n", func, transfer_info->pathname);
 
-  int allowed = checkaccess(authdbFile, 500,
-    username, "rd", transfer_info->pathname);
+  int allowed = checkAccess(authdbFile, username, "rd", transfer_info->pathname);
 
   if (!allowed) {
     char *error = strerror(errno);
