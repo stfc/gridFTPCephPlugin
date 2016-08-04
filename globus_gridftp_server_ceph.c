@@ -27,16 +27,15 @@
 #include "dsi_ceph.h"
 #include "ceph_posix.h"
 
-#include "gridftp_authz.h"
+#include "gridftp_checkaccess.h"
 
 
 #define  CA_MAXCKSUMLEN 32
 #define  CA_MAXCKSUMNAMELEN 15
 
-int useAuthZ;
+char *authdbFilename;
+char* authdbProg;
 
-char *authdbFile;
-int authdbMaxline;
 
 #define ERRORMSGSIZE 256 
 char errorstr[ERRORMSGSIZE];
@@ -49,7 +48,7 @@ globus_version_t local_version = {
   0 /* branch ID */
 };
 
-static char* username;
+static char* VO_Username;
 /*
  * Utility function to get an integer value from the environment
  */
@@ -184,6 +183,64 @@ static void globus_ceph_close(const char* func,
   }
 }
 
+int checkFileExists(const char* filename) {
+
+  struct stat64 statbuf;
+
+  return !stat64(filename, &statbuf);
+
+}
+
+char* checkFileFromConf(const char* confKey, const char* defaultVal) {
+ 
+  char* returnVal = NULL;
+  char *testVal;
+
+  const char* confVal = getenv(confKey);
+  if (confVal == NULL) {
+    globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
+      "%s: Cannot find configuration - check setting of %s in /etc/gridftp.conf\n",
+      __FUNCTION__, confKey);
+
+    globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
+      "%s: Setting file location to default, %s\n",
+      __FUNCTION__, defaultVal);
+    testVal = (char *)defaultVal;
+
+  } else {
+    testVal = (char *)confVal;
+  }
+  
+  if (!checkFileExists(testVal)) {
+    globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
+      "%s: Problem accessing file %s: %s\n", __FUNCTION__, testVal, strerror(errno));
+    
+  }  else {
+    returnVal = strdup(testVal);
+  }
+  
+  return returnVal;
+  
+}
+
+void set_finished_info(
+  globus_gfs_finished_info_t* finished_info,
+  globus_gfs_operation_t op,
+  globus_gfs_session_info_t *session_info,
+  globus_l_gfs_ceph_handle_t* ceph_handle,
+  globus_result_t result) {
+
+  memset(finished_info, '\0', sizeof (globus_gfs_finished_info_t));
+  finished_info->type = GLOBUS_GFS_OP_SESSION_START; // Always this value
+  finished_info->result = result;
+  finished_info->info.session.session_arg = ceph_handle;
+  finished_info->info.session.username = session_info->username;
+  finished_info->info.session.home_dir = NULL; /* if null we will go to HOME directory */
+  ceph_handle->checksum_list = NULL;
+  ceph_handle->checksum_list_p = NULL;
+
+}
+
 /*************************************************************************
  *  start
  *  -----
@@ -201,118 +258,63 @@ static void globus_ceph_close(const char* func,
  *        of the finished_info structure, but it currently does not.
  *        The DSI developer should jsut follow this template for now
  ************************************************************************/
-static void globus_l_gfs_ceph_start(globus_gfs_operation_t op,
-                                    globus_gfs_session_info_t *session_info) {
+static void globus_l_gfs_ceph_start(globus_gfs_operation_t op, globus_gfs_session_info_t *session_info) {
+  
   globus_l_gfs_ceph_handle_t *ceph_handle;
   globus_gfs_finished_info_t finished_info;
-  char *func="globus_l_gfs_ceph_start";
-  
-  useAuthZ = 1;
+  char *func = "globus_l_gfs_ceph_start";
 
   GlobusGFSName(globus_l_gfs_ceph_start);
   ceph_handle = (globus_l_gfs_ceph_handle_t *)
-    globus_malloc(sizeof(globus_l_gfs_ceph_handle_t));
-  globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: started, uid: %u, gid: %u\n",
-                         func, getuid(), getgid());
-  globus_mutex_init(&ceph_handle->mutex,NULL);
+    globus_malloc(sizeof (globus_l_gfs_ceph_handle_t));
+  globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s: started, uid: %u, gid: %u\n",
+    func, getuid(), getgid());
+  globus_mutex_init(&ceph_handle->mutex, NULL);
+
+  globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s: host_id = %s, mapped username = %s\n",
+    func, session_info->host_id, session_info->username);
+    
+  authdbProg = checkFileFromConf("GRIDFTP_CEPH_AUTHDB_PROG", "/usr/bin/xrdacctest");
+ 
+  if (authdbProg == NULL) {
+    set_finished_info(&finished_info, op, session_info, ceph_handle, GLOBUS_FAILURE);
+    globus_gridftp_server_operation_finished(op, GLOBUS_FAILURE, &finished_info);
+
+    return;
+  } 
   
-  globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: host_id = %s, mapped username = %s\n",
-                         func, session_info->host_id, session_info->username);  
+  authdbFilename = checkFileFromConf("GRIDFTP_CEPH_AUTHDB_FILE", "/etc/grid-security/authdb");
 
+  if (authdbFilename == NULL) {
+    set_finished_info(&finished_info, op, session_info, ceph_handle, GLOBUS_FAILURE);
+    globus_gridftp_server_operation_finished(op, GLOBUS_FAILURE, &finished_info);
 
-  if (getenv("GRIDFTP_CEPH_USE_AUTHZ") == NULL) {
+    return;
+  } 
+
+  const char* radosUserKey = "GRIDFTP_CEPH_RADOS_USER";
+  const char* radosUserId = getenv(radosUserKey);
+  
+  if (radosUserId == NULL) {
 
     globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
-      "%s: Not using authorization\n",
-      __FUNCTION__);
+      "%s: Cannot find configuration - check setting of %s in /etc/gridftp.conf\n",
+      __FUNCTION__, radosUserKey);
 
-    useAuthZ = 0;
-
-  } else {
-
-
-    const char * authfilenameConf = "GRIDFTP_CEPH_AUTHDB_FILE";
-    authdbFile = getenv(authfilenameConf);
-    if (authdbFile == NULL) {
-      globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
-        "%s: Cannot open AuthDB file %s - check setting of %s in /etc/gridftp.conf\n",
-        __FUNCTION__, authdbFile, authfilenameConf);
-
-      authdbFile = "/opt/xrd/etc/Authfile";
-    }
-
-    struct stat64 statbuf;
-
-    const int authdbfileExists = stat64(authdbFile, &statbuf);
-
-    if (authdbfileExists != 0) {
-      globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
-        "%s: Problem with authorization file %s: %s\n", __FUNCTION__, authdbFile, strerror(errno));
-
-
-      memset(&finished_info, '\0', sizeof (globus_gfs_finished_info_t));
-      finished_info.type = GLOBUS_GFS_OP_SESSION_START;
-      finished_info.result = GLOBUS_FAILURE;
-      finished_info.info.session.session_arg = ceph_handle;
-      finished_info.info.session.username = session_info->username;
-      finished_info.info.session.home_dir = NULL; /* if null we will go to HOME directory */
-      ceph_handle->checksum_list = NULL;
-      ceph_handle->checksum_list_p = NULL;
-      globus_gridftp_server_operation_finished(op, GLOBUS_FAILURE, &finished_info);
-      return;
-
-    } else {
-
-      const char* authdbMaxlineStr = getenv("GRIDFTP_CEPH_AUTHDB_MAXLINE");
-      if (authdbMaxlineStr == NULL) {
-        authdbMaxline = 1024;
-      } else {
-        authdbMaxline = atoi(authdbMaxlineStr);
-
-      }
-      globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
-        "%s: Using authorization rules from %s\n", __FUNCTION__, authdbFile);
-      //
-      useAuthZ = 1;
-
-    }
-
-  }
-  
-  char *radosUserId = getenv("GRIDFTP_CEPH_RADOS_USER");
-  if (radosUserId == NULL) {
-    
-    memset(&finished_info, '\0', sizeof(globus_gfs_finished_info_t));
-    finished_info.type = GLOBUS_GFS_OP_SESSION_START;
-    finished_info.result = GLOBUS_FAILURE;
-    finished_info.info.session.session_arg = ceph_handle;
-    finished_info.info.session.username = session_info->username;
-    finished_info.info.session.home_dir = NULL; /* if null we will go to HOME directory */
-    ceph_handle->checksum_list=NULL;
-    ceph_handle->checksum_list_p=NULL;
     globus_gridftp_server_operation_finished(op, GLOBUS_FAILURE, &finished_info);
-    
+
+    return; 
+
   }
+  
   ceph_posix_set_radosUserId(radosUserId);
+  VO_Username = strdup(session_info->username);
   
-  username = strdup(session_info->username);
+  set_finished_info(&finished_info, op, session_info, ceph_handle, GLOBUS_SUCCESS);
  
-  memset(&finished_info, '\0', sizeof(globus_gfs_finished_info_t));
-  finished_info.type = GLOBUS_GFS_OP_SESSION_START;
-  finished_info.result = GLOBUS_SUCCESS;
-  finished_info.info.session.session_arg = ceph_handle;
-  finished_info.info.session.username = session_info->username;
-  finished_info.info.session.home_dir = NULL; /* if null we will go to HOME directory */
-  ceph_handle->checksum_list=NULL;
-  ceph_handle->checksum_list_p=NULL;
   globus_gridftp_server_operation_finished(op, GLOBUS_SUCCESS, &finished_info);
-  
-  
-  globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: leaving.\n",
-                         func);  
-  
-  useAuthZ = 1;
-  
+  globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: leaving.\n", func);  
+
 }
 
 /*************************************************************************
@@ -352,10 +354,12 @@ static void globus_l_gfs_ceph_stat(globus_gfs_operation_t op,
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s: %s\n",
                          func, stat_info->pathname);
   
-//  char *realpath = strdup(stat_info->pathname);
   
+    globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+          "%s: prog= %s, audhdb= %s, VO_Username= %s, op= %s, pathname= %s\n",
+      func, authdbProg, authdbFilename, VO_Username, "rd", stat_info->pathname);  
   
-  int allowed = checkAccess(authdbFile, username, "rd", stat_info->pathname);
+  int allowed = checkAccess(authdbProg, authdbFilename, VO_Username, "rd", stat_info->pathname);
 
   if (!allowed) {
     result = GlobusGFSErrorGeneric("globus_l_gfs_ceph_stat: authorization error: 'MLST' operation not allowed");
@@ -461,19 +465,10 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
       /* Support DELE for GridPP FTS when the target already exists*/
     case GLOBUS_GFS_CMD_DELE:
 
-
       globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
       "%s: DELETE %s\n", __FUNCTION__, cmd_info->pathname);
 
-      if (useAuthZ) {
-        allowed = checkAccess(authdbFile, username, "wr", cmd_info->pathname);
-
-        globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
-          "%s: allowed = %d\n", __FUNCTION__, allowed);
-
-      } else {
-        allowed = 1;
-      }
+      allowed = checkAccess(authdbProg, authdbFilename, VO_Username, "wr", cmd_info->pathname);
 
       if (!allowed) {
         
@@ -481,22 +476,21 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
           "%s: Authorization failure: cannot DELETE %s\n", __FUNCTION__, cmd_info->pathname);   
         
         snprintf(errormessage, ERRORMSGSIZE, "Authorization error: DELETE operation for user %s not allowed on %s", 
-          username, cmd_info->pathname);
+          VO_Username, cmd_info->pathname);
 
         result = GlobusGFSErrorGeneric(errormessage);
         errno = ENOENT; 
-        globus_gridftp_server_finished_command(op, result, GLOBUS_NULL); // result, errorstr);
+        globus_gridftp_server_finished_command(op, result, GLOBUS_NULL); 
       } else {
-        
-        if (useAuthZ) {
-          globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
-            "%s: Authorization success: DELETE operation allowed\n", __FUNCTION__);
-        }
+
+        globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+          "%s: Authorization success: DELETE operation allowed\n", __FUNCTION__);
+
 
         int status = ceph_posix_delete(cmd_info->pathname);
         if (status != 0) {
           globus_gfs_log_message(GLOBUS_GFS_LOG_ERR,
-                  "DELE return code is %d\n", status); // Log the actual failure reason... 
+            "DELE return code is %d\n", status); // Log the actual failure reason... 
           errno = ENOENT; // but tell the client that target doesn't exist.
           globus_gridftp_server_finished_command(op, GLOBUS_SUCCESS, GLOBUS_NULL);
         } else {
@@ -519,35 +513,31 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
     case GLOBUS_GFS_CMD_MKD:
 
       /*
-       *
-       * Check if FTS responds sensibly when it tries to make a parent directory? Or should it have
-       * already been denied 'wr' access?
-       */
+         *
+         * Check if FTS responds sensibly when it tries to make a parent directory? Or should it have
+         * already been denied 'wr' access?
+         */
 
-      if (useAuthZ) {
-        allowed = checkAccess(authdbFile, username, "wr", cmd_info->pathname);
-      } else {
-        allowed = 1;
-      }
+
+      allowed = checkAccess(authdbProg, authdbFilename, VO_Username, "wr", cmd_info->pathname);
+
       if (!allowed) {
         sprintf(errormessage, "Authorization error: MKDIR operation for user %s not allowed on %s", 
-          username, cmd_info->pathname);
+          VO_Username, cmd_info->pathname);
         result = GlobusGFSErrorGeneric(errormessage);
         globus_gridftp_server_finished_command(op, result, errormessage);
         
       } else {
-        
-        if (useAuthZ) {
-          globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
-            "%s: acc.success: MKDIR operation  allowed\n", __FUNCTION__);
-        }
+
+        globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+          "%s: acc.success: MKDIR operation  allowed\n", __FUNCTION__);
+
         
        /*
        * The core of GrdiFTP will return a '257 MKD <pathname> Pathname: Created Successfully message'
         * We don't need to do anything server-side.
        */    
         ;
-        
         
         globus_gridftp_server_finished_command(op, GLOBUS_SUCCESS, GLOBUS_NULL);
 
@@ -562,22 +552,20 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
 
     case GLOBUS_GFS_CMD_CKSM:
 
-      if (useAuthZ) {
-        allowed = checkAccess(authdbFile, username, "rd", cmd_info->pathname);
-      } else {
-        allowed = 1;
-      }
+      allowed = checkAccess(authdbProg, authdbFilename, VO_Username, "rd", cmd_info->pathname);
+
 
       if (!allowed) {
-        (void)snprintf(errormessage, ERRORMSGSIZE, "Authorization error: CHECKSUM operation for user %s not allowed.", username);
+        (void)snprintf(errormessage, ERRORMSGSIZE, 
+          "Authorization error: CHECKSUM operation for user %s on %s not allowed.", VO_Username, cmd_info->pathname);
         result = GlobusGFSErrorGeneric(errormessage);
         globus_gridftp_server_finished_command(op, GLOBUS_FAILURE, errormessage);
         
       } else {
-        if (useAuthZ) {
+
           globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
           "authz .success: CHECKSUM operation allowed\n");
-        }
+
 
         //      cksm_alg = cmd_info->cksm_alg; // In case we support checksums other than ADLER32 in the future...
         //      /** offset for cksm command */
@@ -917,11 +905,11 @@ static void globus_l_gfs_ceph_recv(globus_gfs_operation_t op,
           "%s: started for %s\n", func, transfer_info->pathname);
   
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
-          "%s: username == %s, authdbfile = %s\n", func, username, authdbFile);
+          "%s: username == %s, authdbfile = %s\n", func, VO_Username, authdbFilename);
   
-  if (useAuthZ) {
+
   
-  int allowed = checkAccess(authdbFile, username, "wr", transfer_info->pathname);
+  int allowed = checkAccess(authdbProg, authdbFilename, VO_Username, "wr", transfer_info->pathname);
    
   if (!allowed) {
     char *error = strerror(errno);
@@ -929,28 +917,23 @@ static void globus_l_gfs_ceph_recv(globus_gfs_operation_t op,
           "%s: Authorization failure: STOR operation fails: %s\n", func, error);  
     (void)snprintf(errorstr, ERRORMSGSIZE, 
             "Authorization error: operation %s not allowed for user %s on path %s", 
-            operation, username, transfer_info->pathname);
+            operation, VO_Username, transfer_info->pathname);
     result = GlobusGFSErrorGeneric(errorstr);
     
     globus_gridftp_server_finished_transfer(op, result);
     return;
   } else {
     globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
-          "%s: acc.success: STOR' operation  allowed\n", func);
+          "%s: acc.success: 'STOR' operation  allowed\n", func);
   }
 
-}
   pathname=strdup(transfer_info->pathname);
   if(pathname==NULL) {
     result = GlobusGFSErrorGeneric("error: strdup failed");
     globus_gridftp_server_finished_transfer(op, result);
     return;
   }
-  
-//  if (pathname[0] == '/') {   // Get rid of that darn 
-//    pathname++;
-//  }  
-  
+ 
   
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: pathname now: %s \n",func,pathname);
   globus_size_t block_size;
@@ -959,8 +942,6 @@ static void globus_l_gfs_ceph_recv(globus_gfs_operation_t op,
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
           "%s: block_size from globus_gridftp_server_get_block_size: %d \n", func, block_size);
   
-//  op->data_handle->info.blocksize = 33554432;
-
   struct stat64 sbuf;  
   int rc = ceph_posix_stat64(pathname, &sbuf);
   
@@ -975,11 +956,9 @@ static void globus_l_gfs_ceph_recv(globus_gfs_operation_t op,
     
     if (allow_overwrite == 1) {
       globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s : File %s exists - about to delete\n", __FUNCTION__, pathname);
- /*      if (transfer_info->alloc_size < sbuf.st_size)  */
-      rc = ceph_posix_delete(pathname); // ceph_posix_truncate(pathname,mode, flags, 0); // Seems to fail with dodgy pools?
+      rc = ceph_posix_delete(pathname); 
 
       if (rc != 0) {
-        /* globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s : Cannot truncate %s\n", __FUNCTION__, pathname); // reported in ceph_posix_truncate */
         free(pathname);
         result = globus_l_gfs_make_error("open/delete");
         globus_gridftp_server_finished_transfer(op, result);
@@ -1086,11 +1065,11 @@ static void globus_l_gfs_ceph_send(globus_gfs_operation_t op,
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s: started\n", func);
 
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
-    "%s: username is %s\n", func, username);
+    "%s: username is %s\n", func, VO_Username);
 
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s: pathname: %s\n", func, transfer_info->pathname);
 
-  int allowed = checkAccess(authdbFile, username, "rd", transfer_info->pathname);
+  int allowed = checkAccess(authdbProg, authdbFilename, VO_Username, "rd", transfer_info->pathname);
 
   if (!allowed) {
     char *error = strerror(errno);
@@ -1099,7 +1078,7 @@ static void globus_l_gfs_ceph_send(globus_gfs_operation_t op,
 
     (void) snprintf(errorstr, ERRORMSGSIZE,
       "Authorization error: operation %s not allowed for user %s on path %s",
-      operation, username, transfer_info->pathname);
+      operation, VO_Username, transfer_info->pathname);
     result = GlobusGFSErrorGeneric("acc.error: 'rd' operation not allowed");
     globus_gridftp_server_finished_transfer(op, result);
     return;
