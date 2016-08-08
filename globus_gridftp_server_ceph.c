@@ -48,7 +48,7 @@ globus_version_t local_version = {
   0 /* branch ID */
 };
 
-static char* VO_Username;
+static char* VO_Role;
 /*
  * Utility function to get an integer value from the environment
  */
@@ -308,7 +308,7 @@ static void globus_l_gfs_ceph_start(globus_gfs_operation_t op, globus_gfs_sessio
   }
   
   ceph_posix_set_radosUserId(radosUserId);
-  VO_Username = strdup(session_info->username);
+  VO_Role = strdup(session_info->username);
   
   set_finished_info(&finished_info, op, session_info, ceph_handle, GLOBUS_SUCCESS);
  
@@ -356,10 +356,10 @@ static void globus_l_gfs_ceph_stat(globus_gfs_operation_t op,
   
   
     globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
-          "%s: prog= %s, audhdb= %s, VO_Username= %s, op= %s, pathname= %s\n",
-      func, authdbProg, authdbFilename, VO_Username, "rd", stat_info->pathname);  
+          "%s: prog= %s, audhdb= %s, VO_Role= %s, op= %s, pathname= %s\n",
+      func, authdbProg, authdbFilename, VO_Role, "rd", stat_info->pathname);  
   
-  int allowed = checkAccess(authdbProg, authdbFilename, VO_Username, "rd", stat_info->pathname);
+  int allowed = checkAccess(authdbProg, authdbFilename, VO_Role, "rd", stat_info->pathname);
 
   if (!allowed) {
     result = GlobusGFSErrorGeneric("globus_l_gfs_ceph_stat: authorization error: 'MLST' operation not allowed");
@@ -468,7 +468,7 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
       globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
       "%s: DELETE %s\n", __FUNCTION__, cmd_info->pathname);
 
-      allowed = checkAccess(authdbProg, authdbFilename, VO_Username, "wr", cmd_info->pathname);
+      allowed = checkAccess(authdbProg, authdbFilename, VO_Role, "wr", cmd_info->pathname);
 
       if (!allowed) {
         
@@ -476,7 +476,7 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
           "%s: Authorization failure: cannot DELETE %s\n", __FUNCTION__, cmd_info->pathname);   
         
         snprintf(errormessage, ERRORMSGSIZE, "Authorization error: DELETE operation for user %s not allowed on %s", 
-          VO_Username, cmd_info->pathname);
+          VO_Role, cmd_info->pathname);
 
         result = GlobusGFSErrorGeneric(errormessage);
         errno = ENOENT; 
@@ -519,11 +519,11 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
          */
 
 
-      allowed = checkAccess(authdbProg, authdbFilename, VO_Username, "wr", cmd_info->pathname);
+      allowed = checkAccess(authdbProg, authdbFilename, VO_Role, "wr", cmd_info->pathname);
 
       if (!allowed) {
         sprintf(errormessage, "Authorization error: MKDIR operation for user %s not allowed on %s", 
-          VO_Username, cmd_info->pathname);
+          VO_Role, cmd_info->pathname);
         result = GlobusGFSErrorGeneric(errormessage);
         globus_gridftp_server_finished_command(op, result, errormessage);
         
@@ -552,12 +552,12 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
 
     case GLOBUS_GFS_CMD_CKSM:
 
-      allowed = checkAccess(authdbProg, authdbFilename, VO_Username, "rd", cmd_info->pathname);
+      allowed = checkAccess(authdbProg, authdbFilename, VO_Role, "rd", cmd_info->pathname);
 
 
       if (!allowed) {
         (void)snprintf(errormessage, ERRORMSGSIZE, 
-          "Authorization error: CHECKSUM operation for user %s on %s not allowed.", VO_Username, cmd_info->pathname);
+          "Authorization error: CHECKSUM operation for user %s on %s not allowed.", VO_Role, cmd_info->pathname);
         result = GlobusGFSErrorGeneric(errormessage);
         globus_gridftp_server_finished_command(op, GLOBUS_FAILURE, errormessage);
         
@@ -905,11 +905,11 @@ static void globus_l_gfs_ceph_recv(globus_gfs_operation_t op,
           "%s: started for %s\n", func, transfer_info->pathname);
   
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
-          "%s: username == %s, authdbfile = %s\n", func, VO_Username, authdbFilename);
+          "%s: username == %s, authdbfile = %s\n", func, VO_Role, authdbFilename);
   
 
   
-  int allowed = checkAccess(authdbProg, authdbFilename, VO_Username, "wr", transfer_info->pathname);
+  int allowed = checkAccess(authdbProg, authdbFilename, VO_Role, "wr", transfer_info->pathname);
    
   if (!allowed) {
     char *error = strerror(errno);
@@ -917,7 +917,7 @@ static void globus_l_gfs_ceph_recv(globus_gfs_operation_t op,
           "%s: Authorization failure: STOR operation fails: %s\n", func, error);  
     (void)snprintf(errorstr, ERRORMSGSIZE, 
             "Authorization error: operation %s not allowed for user %s on path %s", 
-            operation, VO_Username, transfer_info->pathname);
+            operation, VO_Role, transfer_info->pathname);
     result = GlobusGFSErrorGeneric(errorstr);
     
     globus_gridftp_server_finished_transfer(op, result);
@@ -1065,11 +1065,11 @@ static void globus_l_gfs_ceph_send(globus_gfs_operation_t op,
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s: started\n", func);
 
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
-    "%s: username is %s\n", func, VO_Username);
+    "%s: username is %s\n", func, VO_Role);
 
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s: pathname: %s\n", func, transfer_info->pathname);
 
-  int allowed = checkAccess(authdbProg, authdbFilename, VO_Username, "rd", transfer_info->pathname);
+  int allowed = checkAccess(authdbProg, authdbFilename, VO_Role, "rd", transfer_info->pathname);
 
   if (!allowed) {
     char *error = strerror(errno);
@@ -1078,7 +1078,7 @@ static void globus_l_gfs_ceph_send(globus_gfs_operation_t op,
 
     (void) snprintf(errorstr, ERRORMSGSIZE,
       "Authorization error: operation %s not allowed for user %s on path %s",
-      operation, VO_Username, transfer_info->pathname);
+      operation, VO_Role, transfer_info->pathname);
     result = GlobusGFSErrorGeneric("acc.error: 'rd' operation not allowed");
     globus_gridftp_server_finished_transfer(op, result);
     return;
