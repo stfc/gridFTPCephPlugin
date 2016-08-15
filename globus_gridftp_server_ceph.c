@@ -48,6 +48,9 @@ globus_version_t local_version = {
   0 /* branch ID */
 };
 
+
+char* remove_prefix(char* in, const char* prefix);
+
 static char* VO_Role;
 /*
  * Utility function to get an integer value from the environment
@@ -351,15 +354,18 @@ static void globus_l_gfs_ceph_stat(globus_gfs_operation_t op,
   globus_result_t                  result;
   
   GlobusGFSName(globus_l_gfs_ceph_stat);
+  
+  char* pathname_to_test = remove_prefix(stat_info->pathname, "/");
+  
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s: %s\n",
                          func, stat_info->pathname);
   
   
     globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
           "%s: prog= %s, audhdb= %s, VO_Role= %s, op= %s, pathname= %s\n",
-      func, authdbProg, authdbFilename, VO_Role, "rd", stat_info->pathname);  
+      func, authdbProg, authdbFilename, VO_Role, "rd", pathname_to_test);  
   
-  int allowed = checkAccess(authdbProg, authdbFilename, VO_Role, "rd", stat_info->pathname);
+  int allowed = checkAccess(authdbProg, authdbFilename, VO_Role, "rd", pathname_to_test);
 
   if (!allowed) {
     result = GlobusGFSErrorGeneric("globus_l_gfs_ceph_stat: authorization error: 'MLST' operation not allowed");
@@ -372,7 +378,7 @@ static void globus_l_gfs_ceph_stat(globus_gfs_operation_t op,
   
   
 
-  if (!strcmp("/", stat_info->pathname))   {    // FTS needs some hand-holding
+  if (!strcmp("/", stat_info->pathname))   {    // Make the root directory "/" - FTS needs some hand-holding
     
     globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
         "%s: Looks like a stat on '/' for %s.\n", __FUNCTION__, stat_info->pathname);
@@ -460,6 +466,9 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
   globus_result_t                     result;
   int allowed;
   char errormessage[256];
+  
+  char* pathname_to_test = remove_prefix(cmd_info->pathname, "/");
+
 
   switch (cmd_info->command) {
       /* Support DELE for GridPP FTS when the target already exists*/
@@ -467,8 +476,14 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
 
       globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
       "%s: DELETE %s\n", __FUNCTION__, cmd_info->pathname);
+      globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+ 
 
-      allowed = checkAccess(authdbProg, authdbFilename, VO_Role, "wr", cmd_info->pathname);
+      "%s: checkAccess (VORole = %s, op = %s, pathname = %s\n", 
+        __FUNCTION__, 
+        VO_Role, "wr", pathname_to_test);
+      
+      allowed = checkAccess(authdbProg, authdbFilename, VO_Role, "wr", pathname_to_test);
 
       if (!allowed) {
         
@@ -519,7 +534,7 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
          */
 
 
-      allowed = checkAccess(authdbProg, authdbFilename, VO_Role, "wr", cmd_info->pathname);
+      allowed = checkAccess(authdbProg, authdbFilename, VO_Role, "wr", pathname_to_test);
 
       if (!allowed) {
         sprintf(errormessage, "Authorization error: MKDIR operation for role %s not allowed on %s", 
@@ -552,7 +567,7 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
 
     case GLOBUS_GFS_CMD_CKSM:
 
-      allowed = checkAccess(authdbProg, authdbFilename, VO_Role, "rd", cmd_info->pathname);
+      allowed = checkAccess(authdbProg, authdbFilename, VO_Role, "rd", pathname_to_test);
 
 
       if (!allowed) {
@@ -862,6 +877,20 @@ static void globus_l_gfs_ceph_read_from_net
   }
 }
     
+char* remove_prefix(char* in, const char* inital) {
+  
+  char *out;
+  if (!strncmp(in, inital, strlen(inital))) {
+    out = (char *)malloc(strlen(in));  
+    strcpy(out, in+1);
+  } else {
+    out = (char *)malloc(strlen(in) + 1);  
+    strcpy(out, in);
+  }
+  
+  return out;
+  
+}
 /*************************************************************************
  *  recv
  *  ----
@@ -900,16 +929,18 @@ static void globus_l_gfs_ceph_recv(globus_gfs_operation_t op,
  
   GlobusGFSName(globus_l_gfs_ceph_recv);
   ceph_handle = (globus_l_gfs_ceph_handle_t *) user_arg;
+  
+  char* pathname_to_test = remove_prefix(transfer_info->pathname, "/");
 
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
-          "%s: started for %s\n", func, transfer_info->pathname);
+          "%s: started for %s\n", func, pathname_to_test);
   
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
           "%s: rolename == %s, authdbfile = %s\n", func, VO_Role, authdbFilename);
   
 
   
-  int allowed = checkAccess(authdbProg, authdbFilename, VO_Role, "wr", transfer_info->pathname);
+  int allowed = checkAccess(authdbProg, authdbFilename, VO_Role, "wr", pathname_to_test);
    
   if (!allowed) {
     char *error = strerror(errno);
@@ -917,7 +948,7 @@ static void globus_l_gfs_ceph_recv(globus_gfs_operation_t op,
           "%s: Authorization failure: STOR operation fails: %s\n", func, error);  
     (void)snprintf(errorstr, ERRORMSGSIZE, 
             "Authorization error: operation %s not allowed for role %s on path %s", 
-            operation, VO_Role, transfer_info->pathname);
+            operation, VO_Role, pathname_to_test);
     result = GlobusGFSErrorGeneric(errorstr);
     
     globus_gridftp_server_finished_transfer(op, result);
@@ -943,7 +974,7 @@ static void globus_l_gfs_ceph_recv(globus_gfs_operation_t op,
           "%s: block_size from globus_gridftp_server_get_block_size: %d \n", func, block_size);
   
   struct stat64 sbuf;  
-  int rc = ceph_posix_stat64(pathname, &sbuf);
+  int rc = ceph_posix_stat64(pathname, &sbuf); // if we use pathname_to_test here, we will needlessly remove first char
   
   flags = O_WRONLY | O_CREAT;
   
@@ -1054,6 +1085,9 @@ static void globus_l_gfs_ceph_send(globus_gfs_operation_t op,
   globus_l_gfs_ceph_handle_t *       ceph_handle;
   char * func="globus_l_gfs_ceph_send";
  // char * pathname;
+  
+  const char* pathname_to_test = remove_prefix(transfer_info->pathname, "/");
+  
 
   globus_bool_t done;
   globus_result_t result;
@@ -1067,9 +1101,9 @@ static void globus_l_gfs_ceph_send(globus_gfs_operation_t op,
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
     "%s: rolename is %s\n", func, VO_Role);
 
-  globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s: pathname: %s\n", func, transfer_info->pathname);
+  globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s: pathname: %s\n", func, pathname_to_test);
 
-  int allowed = checkAccess(authdbProg, authdbFilename, VO_Role, "rd", transfer_info->pathname);
+  int allowed = checkAccess(authdbProg, authdbFilename, VO_Role, "rd", pathname_to_test);
 
   if (!allowed) {
     char *error = strerror(errno);

@@ -537,6 +537,11 @@ void fillCephFile(const char *path, CephFile &file) {
   // initially set to 'admin', 'default', 1, 4MB and 4MB
   // but can be changed via a call to ceph_posix_set_defaults
   std::string spath = path;
+  
+  const char* keepSlash = getenv("GRIDFTP_CEPH_KEEP_SLASH");
+  if (keepSlash == NULL) { // If not set, remove keeping slash
+    spath = spath.substr(1);
+  }
   size_t colonPos = spath.find(':');
   if (std::string::npos == colonPos) {   // No colon?
     file.objectname = spath;
@@ -547,7 +552,7 @@ void fillCephFile(const char *path, CephFile &file) {
   } else {
       
     if (!strcmp("1", getdebug())) {
-     logwrapper((char*) "%s : path is '%s'\n", __FUNCTION__, path);
+     logwrapper((char*) "%s : path was '%s', using spath = '%s'\n", __FUNCTION__, path, spath.c_str());
     }   
     colonPos = spath.find(':'); // Argh! When the leading slash isn't present, colonPos is off by one!
     file.objectname = spath.substr(colonPos+1); 
@@ -900,7 +905,7 @@ int ceph_posix_delete(const char *pathname) {
       bl.append((const char*)buf, count);      
       int rc = striper->write(fr.objectname, bl, count, fr.offset);
 #ifdef TRACE_WRITES    
-      if (!blocksize_reported++) {
+      if (blocksize_reported % 10 == 0) {
         logwrapper((char*)"%s : \n\t\t\tstriper->write(%s:%s, %d, offset= %lld) = %d\n",
               __FUNCTION__, fr.pool.c_str(), fr.objectname.c_str(), count, fr.offset, rc);
       }
