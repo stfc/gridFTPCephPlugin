@@ -25,6 +25,9 @@
 #define  CA_MAXCKSUMLEN 32
 #define  CA_MAXCKSUMNAMELEN 15
 
+#include <limits.h>
+#include <sys/param.h>
+
 #define LOWLEVELTRACE
 //std::string saved_ceph_userId; // should this be static?
 //std::string saved_ceph_pool;
@@ -885,15 +888,15 @@ int ceph_posix_delete(const char *pathname) {
   }
 #define TRACE_WRITES
   ssize_t ceph_posix_write(int fd, const void *buf, size_t count) {
+    
+
 #ifdef TRACE_WRITES
-    static int blocksize_reported = 0;
+    static int last_byte_count = -1;
 #endif    
     std::map<unsigned int, CephFileRef>::iterator it = g_fds.find(fd);
     if (it != g_fds.end()) {
       CephFileRef &fr = it->second;
-#ifdef WIBBLERS      
-      logwrapper((char*)"%s: for fd %d, count=%d\n", __FUNCTION__, fd, count);
-#endif
+
       if ((fr.flags & O_WRONLY) == 0) {
         return -EBADF;
       }
@@ -904,11 +907,26 @@ int ceph_posix_delete(const char *pathname) {
       ceph::bufferlist bl;
       bl.append((const char*)buf, count);      
       int rc = striper->write(fr.objectname, bl, count, fr.offset);
+      
 #ifdef TRACE_WRITES    
-      if (blocksize_reported % 10 == 0) {
-        logwrapper((char*)"%s : \n\t\t\tstriper->write(%s:%s, %d, offset= %lld) = %d\n",
-              __FUNCTION__, fr.pool.c_str(), fr.objectname.c_str(), count, fr.offset, rc);
+      
+      if (last_byte_count == -1) {
+        
+       logwrapper((char*)"%s: for fd %d, count=%d\n", __FUNCTION__, fd, count);
+       last_byte_count = count;
+            
+      } else {
+        if (count != last_byte_count) {
+          logwrapper((char*)"\n\n\n %s: for fd %d, byte count has changed.\n", __FUNCTION__, fd);
+          
+        }
       }
+      
+      if (1 /* offset_reported % 10 == 0 */ ) {
+        
+//        check_offset(fr, count);
+        
+      }     
 #endif      
       if (rc != 0) 
           return rc;
