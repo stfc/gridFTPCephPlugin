@@ -466,19 +466,16 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
   globus_result_t                     result;
   int allowed;
   char errormessage[256];
-  
-  
-  globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
-  "%s: %s %s\n", __FUNCTION__, cmd_info->command, cmd_info->pathname);  
-  
-  
+
   char* pathname_to_test = remove_prefix(cmd_info->pathname, "/");
 
 
   switch (cmd_info->command) {
       /* Support DELE for GridPP FTS when the target already exists*/
     case GLOBUS_GFS_CMD_DELE:
-
+      
+      globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+        "%s: DELE %s\n", __FUNCTION__, cmd_info->pathname); 
       globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
       "%s: checkAccess (VORole = %s, op = %s, pathname = %s\n", 
         __FUNCTION__, VO_Role, "wr", pathname_to_test);
@@ -488,9 +485,9 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
       if (!allowed) {
         
         globus_gfs_log_message(GLOBUS_GFS_LOG_ERR,
-          "%s: Authorization failure: cannot DELETE %s\n", __FUNCTION__, cmd_info->pathname);   
+          "%s: Authorization failure: cannot DELE %s\n", __FUNCTION__, cmd_info->pathname);   
         
-        snprintf(errormessage, ERRORMSGSIZE, "Authorization error: DELETE operation for role %s not allowed on %s", 
+        snprintf(errormessage, ERRORMSGSIZE, "Authorization error: DELE operation for role %s not allowed on %s", 
           VO_Role, cmd_info->pathname);
 
         result = GlobusGFSErrorGeneric(errormessage);
@@ -499,7 +496,7 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
       } else {
 
         globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
-          "%s: Authorization success: DELETE operation allowed\n", __FUNCTION__);
+          "%s: Authorization success: DELE operation allowed\n", __FUNCTION__);
 
         int status = ceph_posix_delete(cmd_info->pathname);
         if (status != 0) {
@@ -531,7 +528,8 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
          * Check if FTS responds sensibly when it tries to make a parent directory? Or should it have
          * already been denied 'wr' access?
          */
-
+      globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+        "%s: MKD %s\n", __FUNCTION__, cmd_info->pathname); 
       globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
       "%s: checkAccess (VORole = %s, op = %s, pathname = %s\n", 
         __FUNCTION__, VO_Role, "wr", pathname_to_test);
@@ -539,7 +537,7 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
       allowed = checkAccess(authdbProg, authdbFilename, VO_Role, "wr", pathname_to_test);
 
       if (!allowed) {
-        sprintf(errormessage, "Authorization error: MKDIR operation for role %s not allowed on %s", 
+        sprintf(errormessage, "Authorization error: MKD operation for role %s not allowed on %s", 
           VO_Role, cmd_info->pathname);
         result = GlobusGFSErrorGeneric(errormessage);
         globus_gridftp_server_finished_command(op, result, errormessage);
@@ -547,7 +545,7 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
       } else {
 
         globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
-          "%s: acc.success: MKDIR operation  allowed\n", __FUNCTION__);
+          "%s: acc.success: MKD operation allowed\n", __FUNCTION__);
 
         
        /*
@@ -570,6 +568,8 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
     case GLOBUS_GFS_CMD_CKSM:
 
       globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+        "%s: CKSM %s\n", __FUNCTION__, cmd_info->pathname);
+      globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
         "%s: checkAccess (VORole = %s, op = %s, pathname = %s\n", 
         __FUNCTION__, VO_Role, "rd", pathname_to_test);
       
@@ -577,14 +577,14 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
 
       if (!allowed) {
         (void)snprintf(errormessage, ERRORMSGSIZE, 
-          "Authorization error: CHECKSUM operation for role %s on %s not allowed.", VO_Role, cmd_info->pathname);
+          "Authorization error: CKSM operation for role %s on %s not allowed.", VO_Role, cmd_info->pathname);
         result = GlobusGFSErrorGeneric(errormessage);
         globus_gridftp_server_finished_command(op, GLOBUS_FAILURE, errormessage);
         
       } else {
 
           globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
-          "authz .success: CHECKSUM operation allowed\n");
+          "authz .success: CKSM operation allowed\n");
 
 
         //      cksm_alg = cmd_info->cksm_alg; // In case we support checksums other than ADLER32 in the future...

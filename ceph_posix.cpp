@@ -138,7 +138,7 @@ static int getCephUserId(const std::string &params) {
 
 static int getCephPool(const std::string &params, unsigned int offset, std::string &pool) {
 
-  if (!strcmp(getdebug(), "1")) {
+  if (!strcmp(getdebug(), "9")) {
     logwrapper((char*) "%s: params='%s', using %s\n", __FUNCTION__,
             params.c_str(), params.substr(offset).c_str()); // This duplicates info from stat() in the calling code)
   }
@@ -149,7 +149,7 @@ static int getCephPool(const std::string &params, unsigned int offset, std::stri
     if (params.size() != offset) {
       int colonPos = params.find(':');
       pool = params.substr(offset, colonPos - offset);
-      if (!strcmp(getdebug(), "1")) {
+      if (!strcmp(getdebug(), "9")) {
         logwrapper((char*) "%s : No comma, pool = %s, returning position %d\n",
                 __FUNCTION__, pool.c_str(), params.size());
       }
@@ -495,9 +495,9 @@ void fillCephFileParams(const std::string &params, CephFile &file) {
 //  file.objectSize = objectSize;
  
   if (!strcmp("1", getdebug())) {
-    logwrapper((char*)"%s : radosUserID = %s, , pool= %s, nbStripes= %d, stripeUnit= %d, objectSize= %d\n", 
+    logwrapper((char*)"%s : radosUserID = %s, pool = %s, name = %s, nbStripes = %d, stripeUnit = %d, objectSize = %d\n", 
             __FUNCTION__, 
-            file.radosUserId.c_str(), file.pool.c_str(), file.nbStripes, file.stripeUnit, file.objectSize);
+            file.radosUserId.c_str(), file.pool.c_str(), file.objectname.c_str(), file.nbStripes, file.stripeUnit, file.objectSize);
   }   
   
 }
@@ -554,13 +554,13 @@ void fillCephFile(const char *path, CephFile &file) {
     fillCephFileParams("", file);
   } else {
       
-    if (!strcmp("1", getdebug())) {
+    if (!strcmp("9", getdebug())) {
      logwrapper((char*) "%s : path was '%s', using spath = '%s'\n", __FUNCTION__, path, spath.c_str());
     }   
     colonPos = spath.find(':'); // Argh! When the leading slash isn't present, colonPos is off by one!
     file.objectname = spath.substr(colonPos+1); 
     
-    if (!strcmp("1", getdebug())) {
+    if (!strcmp("9", getdebug())) {
       logwrapper((char*) "\n\t%s : file.name = '%s'\n", "fillCephFile", file.objectname.c_str());
 
     }
