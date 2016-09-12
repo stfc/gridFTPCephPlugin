@@ -467,6 +467,11 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
   int allowed;
   char errormessage[256];
   
+  
+  globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+  "%s: %s %s\n", __FUNCTION__, cmd_info->command, cmd_info->pathname);  
+  
+  
   char* pathname_to_test = remove_prefix(cmd_info->pathname, "/");
 
 
@@ -475,13 +480,8 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
     case GLOBUS_GFS_CMD_DELE:
 
       globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
-      "%s: DELETE %s\n", __FUNCTION__, cmd_info->pathname);
-      globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
- 
-
       "%s: checkAccess (VORole = %s, op = %s, pathname = %s\n", 
-        __FUNCTION__, 
-        VO_Role, "wr", pathname_to_test);
+        __FUNCTION__, VO_Role, "wr", pathname_to_test);
       
       allowed = checkAccess(authdbProg, authdbFilename, VO_Role, "wr", pathname_to_test);
 
@@ -500,7 +500,6 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
 
         globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
           "%s: Authorization success: DELETE operation allowed\n", __FUNCTION__);
-
 
         int status = ceph_posix_delete(cmd_info->pathname);
         if (status != 0) {
@@ -533,7 +532,10 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
          * already been denied 'wr' access?
          */
 
-
+      globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+      "%s: checkAccess (VORole = %s, op = %s, pathname = %s\n", 
+        __FUNCTION__, VO_Role, "wr", pathname_to_test);
+      
       allowed = checkAccess(authdbProg, authdbFilename, VO_Role, "wr", pathname_to_test);
 
       if (!allowed) {
@@ -567,8 +569,11 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
 
     case GLOBUS_GFS_CMD_CKSM:
 
+      globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+        "%s: checkAccess (VORole = %s, op = %s, pathname = %s\n", 
+        __FUNCTION__, VO_Role, "rd", pathname_to_test);
+      
       allowed = checkAccess(authdbProg, authdbFilename, VO_Role, "rd", pathname_to_test);
-
 
       if (!allowed) {
         (void)snprintf(errormessage, ERRORMSGSIZE, 
