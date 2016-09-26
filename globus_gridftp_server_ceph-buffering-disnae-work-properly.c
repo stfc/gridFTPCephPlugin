@@ -607,34 +607,6 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
   return;
 }
 
-unsigned long add_checksum_to_list(
-  globus_l_gfs_ceph_handle_t *ceph_handle,
-  globus_byte_t *buffer,
-  globus_off_t offset,
-  globus_size_t nbytes) {
-  
-  unsigned long adler;
-  /* fill the checksum list  */
-  /* we will have a lot of checksums blocks in the list */
-  adler = adler32(0L, Z_NULL, 0);
-  adler = adler32(adler, buffer, nbytes);
-
-  ceph_handle->checksum_list_p->next =
-    (checksum_block_list_t *) globus_malloc(sizeof (checksum_block_list_t));
-
-  if (ceph_handle->checksum_list_p->next == NULL) {
-    return GLOBUS_FALSE;
-  }
-  
-  ceph_handle->checksum_list_p->next->next = NULL;
-  ceph_handle->checksum_list_p->offset = offset;
-  ceph_handle->checksum_list_p->size = nbytes;
-  ceph_handle->checksum_list_p->csumvalue = adler;
-  ceph_handle->checksum_list_p = ceph_handle->checksum_list_p->next;
-  ceph_handle->number_of_blocks++;
-  /* end of the checksum section */  
-  return GLOBUS_TRUE;
-}
 int ceph_handle_open(char *path,
                      int flags,
                      int mode,
@@ -649,67 +621,6 @@ int ceph_handle_open(char *path,
   return (rc);
 }
 
-/* combine checksums, while making sure that we deal with missing chunks */
-
-unsigned long get_file_checksum(
-  globus_l_gfs_ceph_handle_t *ceph_handle,
-  checksum_block_list_t** checksum_array,
-  globus_off_t chkOffset,
-  unsigned long file_checksum) {
-
-  
-  
-//  unsigned long file_checksum;
-  unsigned long i;
-  for (i = 1; i < ceph_handle->number_of_blocks; i++) {
-    /* check the continuity with previous chunk */
-    if (checksum_array[i]->offset != chkOffset) {
-      // not continuous, either a chunk is missing or we have overlapping chunks
-      if (checksum_array[i]->offset > chkOffset) {
-        // a chunk is missing, consider it full of 0s
-        globus_off_t doff = checksum_array[i]->offset - chkOffset;
-        file_checksum = adler32_combine_(file_checksum, adler32_0chunks(doff), doff);
-        chkOffset = checksum_array[i]->offset;
-      } else {
-
-        return 0;
-
-      }
-    }
-    /* now handle the next chunk */
-    file_checksum = adler32_combine_(file_checksum,
-      checksum_array[i]->csumvalue,
-      checksum_array[i]->size);
-    chkOffset += checksum_array[i]->size;
-  }
-  return file_checksum;
-
-}
-
-checksum_block_list_t** checksum_list_to_array(
-  globus_l_gfs_ceph_handle_t *ceph_handle) {
-  
-  checksum_block_list_t** checksum_array =(checksum_block_list_t**)
-    globus_calloc(ceph_handle->number_of_blocks, sizeof(checksum_block_list_t*));
-
-  if (checksum_array == NULL) {
-    return NULL;
-  }
-  
-  checksum_block_list_t *checksum_list_pp = ceph_handle->checksum_list;
-  /* sorting of the list to the array */
-  int index = 0;
-  /* the latest block is always empty and has next pointer as NULL */
-  while (checksum_list_pp->next != NULL) {
-    checksum_array[index] = checksum_list_pp;
-    checksum_list_pp = checksum_list_pp->next;
-    index++;
-  }
-  qsort(checksum_array, index, sizeof (checksum_block_list_t*), offsetComparison);
-
-  return checksum_array;
-         
-}
 /* receive from client */
 static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
                                           globus_result_t result,
@@ -731,35 +642,20 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
   char *                       ckSumalg = "ADLER32"; /* we only support Adler32 for gridftp */
   char *                       func = "globus_l_gfs_file_net_read_cb";
   
-  static globus_size_t last_nbytes = 0;
   static int reported_nbytes = 0;
 
   if (!strcmp(getdebug(), "1")){
     if (reported_nbytes == 0) {
-      globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
-      "%s\n\tEOF = %s\n",  __FUNCTION__, eof ? "TRUE" : "FALSE");
-      globus_gfs_log_message(GLOBUS_GFS_LOG_INFO, 
-        "%s: offset = %d, nbytes = %d\n", __FUNCTION__, offset, nbytes);
-  
+      globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,"%s: start, offset = %lld, nbytes = %d\n", func, offset, nbytes);
+    reported_nbytes = 1;
     }
-    
-    if (nbytes != last_nbytes) {
-      globus_gfs_log_message(GLOBUS_GFS_LOG_INFO, "%s: nbytes was %d\n", __FUNCTION__, last_nbytes);
-      last_nbytes = nbytes;        
-    }
-
   }
-  
   ceph_handle = (globus_l_gfs_ceph_handle_t *) user_arg;
 
   globus_mutex_lock(&ceph_handle->mutex);
   {
-    if (eof) {
-      ceph_handle->done = GLOBUS_TRUE;
-    }
-        
+    if (eof) ceph_handle->done = GLOBUS_TRUE;
     ceph_handle->outstanding--;
-        
     if(result != GLOBUS_SUCCESS) {
       ceph_handle->cached_res = result;
       ceph_handle->done = GLOBUS_TRUE;
@@ -779,19 +675,29 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
           globus_mutex_unlock(&ceph_handle->mutex);
           return;
         } else {
-          
-          int added_checksum = add_checksum_to_list(ceph_handle, buffer, offset, nbytes);
-          if (added_checksum == GLOBUS_FALSE) {
+          /* fill the checksum list  */
+          /* we will have a lot of checksums blocks in the list */
+          adler = adler32(0L, Z_NULL, 0);
+          adler = adler32(adler, buffer, nbytes);
 
+          ceph_handle->checksum_list_p->next=
+            (checksum_block_list_t *)globus_malloc(sizeof(checksum_block_list_t));
+
+          if (ceph_handle->checksum_list_p->next==NULL) {
             ceph_handle->cached_res = GLOBUS_FAILURE;
             globus_gfs_log_message(GLOBUS_GFS_LOG_ERR,"%s: malloc error \n",func);
             ceph_handle->done = GLOBUS_TRUE;
             globus_mutex_unlock(&ceph_handle->mutex);
             return;
-            
-          }         
-          
-          if ((globus_size_t)bytes_written < nbytes) {
+          }
+          ceph_handle->checksum_list_p->next->next=NULL;
+          ceph_handle->checksum_list_p->offset=offset;
+          ceph_handle->checksum_list_p->size=bytes_written;
+          ceph_handle->checksum_list_p->csumvalue=adler;
+          ceph_handle->checksum_list_p=ceph_handle->checksum_list_p->next;
+          ceph_handle->number_of_blocks++;
+          /* end of the checksum section */
+          if((globus_size_t)bytes_written < nbytes) {
             errno = ENOSPC;
             ceph_handle->cached_res = globus_l_gfs_make_error("write");
             ceph_handle->done = GLOBUS_TRUE;
@@ -806,16 +712,13 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
 
     globus_free(buffer);
     /* if not done just register the next one */
-    if (!ceph_handle->done) {
-      globus_l_gfs_ceph_read_from_net(ceph_handle);
-    }  else if(ceph_handle->outstanding == 0) { /* if done and there are no outstanding callbacks finish */
-      
-          globus_gfs_log_message(GLOBUS_GFS_LOG_INFO, "%s: AFTER check outstanding == 0 \n", __FUNCTION__); 
-
+    if (!ceph_handle->done) globus_l_gfs_ceph_read_from_net(ceph_handle);
+    /* if done and there are no outstanding callbacks finish */
+    else if(ceph_handle->outstanding == 0) {
       if (ceph_handle->number_of_blocks > 0) {
-
-        checksum_array = checksum_list_to_array(ceph_handle);
-        
+        /* checksum calculation */
+        checksum_array=(checksum_block_list_t**)
+          globus_calloc(ceph_handle->number_of_blocks,sizeof(checksum_block_list_t*));
         if (checksum_array == NULL) {
           free_checksum_list(ceph_handle->checksum_list);
           ceph_handle->fileSize = 0;
@@ -823,7 +726,16 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
           globus_mutex_unlock(&ceph_handle->mutex);
           return;
         }
-        
+        checksum_list_pp=ceph_handle->checksum_list;
+        /* sorting of the list to the array */
+        index = 0;
+        /* the latest block is always empty and has next pointer as NULL */
+        while (checksum_list_pp->next != NULL) {
+          checksum_array[index] = checksum_list_pp;
+          checksum_list_pp=checksum_list_pp->next;
+          index++;
+        }
+        qsort(checksum_array, index, sizeof(checksum_block_list_t*), offsetComparison);
         /* combine checksums, while making sure that we deal with missing chunks */
         globus_off_t chkOffset = 0;
         /* check whether first chunk is missing */
@@ -837,24 +749,37 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
           file_checksum = checksum_array[0]->csumvalue;
         }
         chkOffset += checksum_array[0]->size;
-        
-        file_checksum = get_file_checksum(ceph_handle, checksum_array, chkOffset, file_checksum);
-
-        if (file_checksum == 0) {
-          // overlapping chunks. This is not supported, fail the transfer
-          free_checksum_list(ceph_handle->checksum_list);
-          globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, 
-            "%s: Overlapping chunks detected while handling 0x%x-0x%x. The overlap starts at 0x%x\n",
-            func, checksum_array[i]->offset, checksum_array[i]->offset + checksum_array[i]->size,
-            chkOffset);
-          globus_ceph_close(func, ceph_handle, "overlapping chunks detected when computing checksum");
-          globus_mutex_unlock(&ceph_handle->mutex);
-          globus_gridftp_server_finished_transfer(op, ceph_handle->cached_res);
-          return;
+        /* go over all received chunks */
+        for (i = 1; i < ceph_handle->number_of_blocks; i++) {
+          /* check the continuity with previous chunk */
+          if (checksum_array[i]->offset != chkOffset) {
+            // not continuous, either a chunk is missing or we have overlapping chunks
+            if (checksum_array[i]->offset > chkOffset) {
+              // a chunk is missing, consider it full of 0s
+              globus_off_t doff = checksum_array[i]->offset - chkOffset;
+              file_checksum = adler32_combine_(file_checksum, adler32_0chunks(doff), doff);
+              chkOffset = checksum_array[i]->offset;
+            } else {
+              // overlapping chunks. This is not supported, fail the transfer
+              free_checksum_list(ceph_handle->checksum_list);
+              globus_gfs_log_message(GLOBUS_GFS_LOG_ERR,"%s: Overlapping chunks detected while handling 0x%x-0x%x. The overlap starts at 0x%x\n",
+                                     func,
+                                     checksum_array[i]->offset,
+                                     checksum_array[i]->offset+checksum_array[i]->size,
+                                     chkOffset);
+              globus_ceph_close(func, ceph_handle, "overlapping chunks detected when computing checksum");
+              globus_mutex_unlock(&ceph_handle->mutex);
+              globus_gridftp_server_finished_transfer(op, ceph_handle->cached_res);
+              return;
+            }
+          }
+          /* now handle the next chunk */
+          file_checksum=adler32_combine_(file_checksum,
+                                         checksum_array[i]->csumvalue,
+                                         checksum_array[i]->size);
+          chkOffset += checksum_array[i]->size;
         }
-        
         sprintf(ckSumbuf, "%lx", file_checksum);
-        
         globus_gfs_log_message(GLOBUS_GFS_LOG_INFO, "%s: checksum for fd %d : AD 0x%lx\n",
                                func,ceph_handle->fd, file_checksum);
         globus_free(checksum_array);
@@ -868,10 +793,10 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
                                       ckSumbuf, strlen(ckSumbuf), 0)) {
           globus_gfs_log_message(GLOBUS_GFS_LOG_ERR,"%s: unable to store checksum value as xattr\n", func);
         }
-      } // ceph_handle->number_of_blocks > 0
+      }
       globus_ceph_close(func, ceph_handle, NULL);
       globus_gridftp_server_finished_transfer(op, ceph_handle->cached_res);
-    } // outstanding == 0
+    }
   }
   globus_mutex_unlock(&ceph_handle->mutex);
 }
