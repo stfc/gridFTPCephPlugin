@@ -55,7 +55,7 @@ static char* VO_Role;
 /*
  * Utility function to get an integer value from the environment
  */
-static int getconfigint(char *key) {
+static int getconfigint(const char *key) {
     
   char *intStr = getenv(key);
   if (NULL == intStr) {
@@ -228,7 +228,6 @@ char* checkFileFromConf(const char* confKey, const char* defaultVal) {
 
 void set_finished_info(
   globus_gfs_finished_info_t* finished_info,
-  globus_gfs_operation_t op,
   globus_gfs_session_info_t *session_info,
   globus_l_gfs_ceph_handle_t* ceph_handle,
   globus_result_t result) {
@@ -239,8 +238,6 @@ void set_finished_info(
   finished_info->info.session.session_arg = ceph_handle;
   finished_info->info.session.username = session_info->username;
   finished_info->info.session.home_dir = NULL; /* if null we will go to HOME directory */
-  ceph_handle->checksum_list = NULL;
-  ceph_handle->checksum_list_p = NULL;
 
 }
 
@@ -280,7 +277,7 @@ static void globus_l_gfs_ceph_start(globus_gfs_operation_t op, globus_gfs_sessio
   authdbProg = checkFileFromConf("GRIDFTP_CEPH_AUTHDB_PROG", "/usr/bin/xrdacctest");
  
   if (authdbProg == NULL) {
-    set_finished_info(&finished_info, op, session_info, ceph_handle, GLOBUS_FAILURE);
+    set_finished_info(&finished_info, session_info, ceph_handle, GLOBUS_FAILURE);
     globus_gridftp_server_operation_finished(op, GLOBUS_FAILURE, &finished_info);
 
     return;
@@ -289,7 +286,7 @@ static void globus_l_gfs_ceph_start(globus_gfs_operation_t op, globus_gfs_sessio
   authdbFilename = checkFileFromConf("GRIDFTP_CEPH_AUTHDB_FILE", "/etc/grid-security/authdb");
 
   if (authdbFilename == NULL) {
-    set_finished_info(&finished_info, op, session_info, ceph_handle, GLOBUS_FAILURE);
+    set_finished_info(&finished_info, session_info, ceph_handle, GLOBUS_FAILURE);
     globus_gridftp_server_operation_finished(op, GLOBUS_FAILURE, &finished_info);
 
     return;
@@ -313,8 +310,38 @@ static void globus_l_gfs_ceph_start(globus_gfs_operation_t op, globus_gfs_sessio
   ceph_posix_set_radosUserId(radosUserId);
   VO_Role = strdup(session_info->username);
   
-  set_finished_info(&finished_info, op, session_info, ceph_handle, GLOBUS_SUCCESS);
+  set_finished_info(&finished_info, session_info, ceph_handle, GLOBUS_SUCCESS);
  
+  ceph_handle->checksum_list = NULL;
+  ceph_handle->checksum_list_p = NULL;
+  
+  const char* confSize = "GRIDFTP_CEPH_MODE_E_WRITE_SIZE";
+  int buffsize = getconfigint(confSize);
+  const int lowpower = 20, highpower = 28, defaultpower = 26;
+  
+  if (buffsize >= lowpower && buffsize <= highpower) {
+    buffsize = 1 << buffsize;
+    globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+      "%s: buffer size set to %d bytes\n", __FUNCTION__, buffsize);    
+    
+  } else {
+    buffsize = 1 << defaultpower;
+    globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+      "%s: Invalid setting for %s, Range is %d to %d. Defaulting to 2^%d bytes (%d)\n",
+      func, confSize, lowpower, highpower, defaultpower, buffsize);
+  } 
+
+  assembly_t * abuff = (assembly_t *)malloc(sizeof(assembly_t));
+  
+  abuff->buffer = (globus_byte_t *)malloc(buffsize * sizeof(globus_byte_t)); 
+  abuff->offset = 0;
+  abuff->nbytes = 0;
+  abuff->capacity = buffsize;
+  
+  ceph_handle->active_buff = abuff;
+
+  ceph_handle->active_start = 0;
+  ceph_handle->active_end = buffsize-1;  
   globus_gridftp_server_operation_finished(op, GLOBUS_SUCCESS, &finished_info);
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: leaving.\n", func);  
 
@@ -710,6 +737,137 @@ checksum_block_list_t** checksum_list_to_array(
   return checksum_array;
          
 }
+
+
+#define BUFFER_WRITE 1
+#define BUFFER_CONTINUE 2
+#define BUFFER_OUT_OF_RANGE 3
+
+int build_buffer(
+  globus_l_gfs_ceph_handle_t * ceph_handle,
+  globus_byte_t *buffer, globus_off_t offset,
+  globus_size_t nbytes, globus_bool_t eof) {
+
+  if (offset < ceph_handle->active_start) {
+    
+    globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: Offset %d < active_start of %d \n", 
+      __FUNCTION__, offset, ceph_handle->active_start );
+
+    return BUFFER_OUT_OF_RANGE;
+  }
+
+//  if (offset + nbytes > ceph_handle->overflow_end + 1) {
+//    return -1;
+//  }
+  
+  assembly_t *abuff;
+
+  if (offset + nbytes - 1 <= ceph_handle->active_end) { // In ACTIVE range
+    
+      globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: EOF=%s, Offset %d + nbytes %d in range (%d - %d)\n", 
+        __FUNCTION__, eof ? "TRUE" : "FALSE", offset, nbytes, ceph_handle->active_start, ceph_handle->active_end);    
+
+    abuff = ceph_handle->active_buff;
+    int index = offset - abuff->offset;
+    memcpy(abuff->buffer+index, buffer, nbytes);
+    abuff->nbytes += nbytes;
+
+    if (abuff->nbytes == abuff->capacity || eof) {
+      globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: Returning BUFFER_WRITE\n", __FUNCTION__);  
+      return BUFFER_WRITE;
+    } else {
+      return BUFFER_CONTINUE;
+    }
+
+  } else {
+    globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: Packet too early: Offset %d + nbytes-1 %d (%d) > active_end of %d \n",
+      __FUNCTION__, offset, (nbytes - 1), (offset + nbytes - 1), ceph_handle->active_end);
+    return BUFFER_OUT_OF_RANGE;
+  }
+
+  
+//  else {                                              // In OVERFLOW range
+//    
+//    
+//    return -1;
+//    
+//    abuff = ceph_handle->rebuff[ceph_handle->overflow];
+//    int index = offset - abuff->offset;
+//    memcpy((void *)(abuff->buffer[index]), buffer, nbytes);
+//    abuff->nbytes += nbytes;
+//    
+//    return BUFFER_CONTINUE;
+//
+//  }
+}
+
+void flip_buffer(globus_l_gfs_ceph_handle_t * ceph_handle) {
+  
+  assembly_t * abuff;
+  
+  abuff = ceph_handle->active_buff;
+  
+  abuff->nbytes = 0;
+  abuff->offset += abuff->capacity;
+  ceph_handle->active_start += abuff->capacity;
+  ceph_handle->active_end += abuff->capacity;
+  
+  globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: Offset increased to %d, active_start = %d, active_end =  %d \n",
+  __FUNCTION__, abuff->offset, ceph_handle->active_start, ceph_handle->active_end);
+
+}
+
+int fill_checksum(
+  globus_l_gfs_ceph_handle_t * ceph_handle,
+  globus_byte_t * buffer,
+  globus_off_t offset,
+  size_t bytes_written) {
+ 
+  unsigned long adler;
+
+  /* fill the checksum list  */
+  /* we will have a lot of checksums blocks in the list */
+  adler = adler32(0L, Z_NULL, 0);
+  adler = adler32(adler, buffer, bytes_written);
+
+  ceph_handle->checksum_list_p->next =
+    (checksum_block_list_t *) globus_malloc(sizeof (checksum_block_list_t));
+
+  if (ceph_handle->checksum_list_p->next == NULL) {
+    ceph_handle->cached_res = GLOBUS_FAILURE;
+    globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: malloc error \n", __FUNCTION__);
+    ceph_handle->done = GLOBUS_TRUE;
+    globus_mutex_unlock(&ceph_handle->mutex);
+    return 0;
+  }
+  ceph_handle->checksum_list_p->next->next = NULL;
+  ceph_handle->checksum_list_p->offset = offset;
+  ceph_handle->checksum_list_p->size = bytes_written;
+  ceph_handle->checksum_list_p->csumvalue = adler;
+  ceph_handle->checksum_list_p = ceph_handle->checksum_list_p->next;
+  ceph_handle->number_of_blocks++;
+  /* end of the checksum section */
+  return 1;
+
+}
+globus_off_t get_offset(globus_l_gfs_ceph_handle_t * ceph_handle) {
+  return ceph_handle->active_buff->offset;
+}
+
+globus_byte_t *get_buffer(globus_l_gfs_ceph_handle_t * ceph_handle) {
+  return ceph_handle->active_buff->buffer;
+}
+
+globus_size_t get_nbytes(globus_l_gfs_ceph_handle_t * ceph_handle) {
+  return ceph_handle->active_buff->nbytes;
+}
+
+globus_size_t get_capacity(globus_l_gfs_ceph_handle_t * ceph_handle) {
+  return ceph_handle->active_buff->capacity;
+}
+
+
+
 /* receive from client */
 static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
                                           globus_result_t result,
@@ -723,7 +881,7 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
   ssize_t                      bytes_written;
   unsigned long                adler;
   checksum_block_list_t**      checksum_array;
-  checksum_block_list_t *      checksum_list_pp;
+//  checksum_block_list_t *      checksum_list_pp;
   unsigned long                index;
   unsigned long                i;
   unsigned long                file_checksum;
@@ -765,43 +923,61 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
       ceph_handle->done = GLOBUS_TRUE;
     }
     else if (nbytes > 0) {
-      start_offset = ceph_posix_lseek64(ceph_handle->fd, offset, SEEK_SET);
-      if (start_offset != offset) {
-        ceph_handle->cached_res = globus_l_gfs_make_error("seek");
-        ceph_handle->done = GLOBUS_TRUE;
-      } else {
-        bytes_written = ceph_posix_write(ceph_handle->fd, buffer, nbytes);
-        if (bytes_written < 0) {
-          globus_gfs_log_message(GLOBUS_GFS_LOG_ERR,"%s: write error, return code %d \n",func, -bytes_written);
-          ceph_handle->cached_res = GLOBUS_FAILURE; //globus_l_gfs_make_error("write"); // GLOBUS_FAILURE;
-          ceph_handle->done = GLOBUS_TRUE;
-          ceph_handle->fileSize = 0;
-          globus_mutex_unlock(&ceph_handle->mutex);
-          return;
-        } else {
-          
-          int added_checksum = add_checksum_to_list(ceph_handle, buffer, offset, nbytes);
-          if (added_checksum == GLOBUS_FALSE) {
+      
+      int action = BUFFER_WRITE;
 
-            ceph_handle->cached_res = GLOBUS_FAILURE;
-            globus_gfs_log_message(GLOBUS_GFS_LOG_ERR,"%s: malloc error \n",func);
+      if (action == BUFFER_WRITE) {
+
+
+        start_offset = ceph_posix_lseek64(ceph_handle->fd, offset, SEEK_SET);
+        if (start_offset != offset) {
+          ceph_handle->cached_res = globus_l_gfs_make_error("seek");
+          ceph_handle->done = GLOBUS_TRUE;
+        } else {
+
+          bytes_written = ceph_posix_write(ceph_handle->fd, buffer, nbytes);
+
+          if (bytes_written < 0) {
+            globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: write error, return code %d \n", func, -bytes_written);
+            ceph_handle->cached_res = GLOBUS_FAILURE; //globus_l_gfs_make_error("write"); // GLOBUS_FAILURE;
             ceph_handle->done = GLOBUS_TRUE;
+            ceph_handle->fileSize = 0;
             globus_mutex_unlock(&ceph_handle->mutex);
             return;
-            
-          }         
-          
-          if ((globus_size_t)bytes_written < nbytes) {
-            errno = ENOSPC;
-            ceph_handle->cached_res = globus_l_gfs_make_error("write");
-            ceph_handle->done = GLOBUS_TRUE;
-            free_checksum_list(ceph_handle->checksum_list);
           } else {
-            globus_gridftp_server_update_bytes_written(op,offset,nbytes);
-            ceph_handle->fileSize += bytes_written;
-          }
-        }
-      }
+
+            int added_checksum = add_checksum_to_list(ceph_handle, buffer, offset, nbytes);
+            if (added_checksum == GLOBUS_FALSE) {
+
+              ceph_handle->cached_res = GLOBUS_FAILURE;
+              globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: malloc error \n", func);
+              ceph_handle->done = GLOBUS_TRUE;
+              globus_mutex_unlock(&ceph_handle->mutex);
+              return;
+
+            }
+
+            if ((globus_size_t) bytes_written < nbytes) {
+
+              errno = ENOSPC;
+              ceph_handle->cached_res = globus_l_gfs_make_error("write");
+              ceph_handle->done = GLOBUS_TRUE;
+              free_checksum_list(ceph_handle->checksum_list);
+
+            } else {
+
+              globus_gridftp_server_update_bytes_written(op, offset, nbytes);
+              ceph_handle->fileSize += bytes_written;
+
+            } // bytes_written == nbytes
+
+          } // bytes_written > 0
+
+        } // offsets OK
+
+
+      } // action == BUFFER_WRITE 
+      
     }
 
     globus_free(buffer);
