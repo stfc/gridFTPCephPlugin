@@ -878,6 +878,7 @@ int ceph_posix_delete(const char *pathname) {
     std::map<unsigned int, CephFileRef>::iterator it = g_fds.find(fd);
     if (it != g_fds.end()) {
       CephFileRef &fr = it->second;
+#define VERYLOWLEVELTRACE
 #ifdef VERYLOWLEVELTRACE     
       logwrapper((char*)"ceph_lseek64: for fd %d, offset=%lld, whence=%d\n", fd, offset, whence);
 #endif
@@ -909,24 +910,15 @@ int ceph_posix_delete(const char *pathname) {
       int rc = striper->write(fr.objectname, bl, count, fr.offset);
       
 #ifdef TRACE_WRITES    
+
+      if (count != last_byte_count) {
+
+        logwrapper((char*) "%s: for fd %d, count=%d\n", __FUNCTION__, fd, count);
+        last_byte_count = count;
+
+      } 
       
-      if (last_byte_count == -1) {
-        
-       logwrapper((char*)"%s: for fd %d, count=%d\n", __FUNCTION__, fd, count);
-       last_byte_count = count;
-            
-      } else {
-        if (count != last_byte_count) {
-          logwrapper((char*)"\n\n\n %s: for fd %d, byte count has changed.\n", __FUNCTION__, fd);
-          
-        }
-      }
-      
-      if (1 /* offset_reported % 10 == 0 */ ) {
-        
-//        check_offset(fr, count);
-        
-      }     
+     
 #endif      
       if (rc != 0) 
           return rc;

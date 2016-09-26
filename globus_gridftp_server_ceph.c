@@ -764,8 +764,8 @@ int build_buffer(
 
   if (offset + nbytes - 1 <= ceph_handle->active_end) { // In ACTIVE range
     
-      globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: EOF=%s, Offset %d + nbytes %d in range (%d - %d)\n", 
-        __FUNCTION__, eof ? "TRUE" : "FALSE", offset, nbytes, ceph_handle->active_start, ceph_handle->active_end);    
+      globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: EOF=%s, Offset %d + nbytes-1 %d in range (%d - %d)\n", 
+        __FUNCTION__, eof ? "TRUE" : "FALSE", offset, nbytes-1, ceph_handle->active_start, ceph_handle->active_end);    
 
     abuff = ceph_handle->active_buff;
     int index = offset - abuff->offset;
@@ -892,18 +892,15 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
   static globus_size_t last_nbytes = 0;
   static int reported_nbytes = 0;
 
-  if (!strcmp(getdebug(), "1")){
-    if (reported_nbytes == 0) {
-      globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
-      "%s\n\tEOF = %s\n",  __FUNCTION__, eof ? "TRUE" : "FALSE");
-      globus_gfs_log_message(GLOBUS_GFS_LOG_INFO, 
-        "%s: offset = %d, nbytes = %d\n", __FUNCTION__, offset, nbytes);
-  
-    }
+  if (!strcmp(getdebug(), "1")) {
+
+    globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
+      "%s\n\tEOF = %s, offset = %d, nbytes = %d\n", 
+      __FUNCTION__, eof ? "TRUE" : "FALSE", offset, nbytes);
     
     if (nbytes != last_nbytes) {
-      globus_gfs_log_message(GLOBUS_GFS_LOG_INFO, "%s: nbytes was %d\n", __FUNCTION__, last_nbytes);
-      last_nbytes = nbytes;        
+      globus_gfs_log_message(GLOBUS_GFS_LOG_INFO, "%s: nbytes was previously %d\n", __FUNCTION__, last_nbytes);
+      last_nbytes = nbytes;
     }
 
   }
@@ -918,35 +915,91 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
         
     ceph_handle->outstanding--;
         
-    if(result != GLOBUS_SUCCESS) {
+    if (result != GLOBUS_SUCCESS) {
+      
       ceph_handle->cached_res = result;
       ceph_handle->done = GLOBUS_TRUE;
-    }
-    else if (nbytes > 0) {
       
-      int action = BUFFER_WRITE;
+    } else if (nbytes > 0  || get_nbytes(ceph_handle) > 0) {
+      
+      int action;
+      
+      if (nbytes == 0 && get_nbytes(ceph_handle) > 0) {
+        globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, 
+          "%s: \n\n\tDetected 0 bytes read, but data left in assembly buffer\n\n", __FUNCTION__);
+        
+        action = BUFFER_WRITE;
+        
+      }
+      
+      int buffering = GLOBUS_FALSE;
+      globus_byte_t *a_buffer;
+      globus_off_t a_offset;
+      globus_size_t a_nbytes;
+      
+      
+      if (nbytes > get_capacity(ceph_handle)) { // Can't fit incoming data into buffer
+        
+        action = BUFFER_WRITE;
+        buffering = GLOBUS_FALSE;
+        
+      } else {
+        
+        if (nbytes > 0) {
+          action = build_buffer(ceph_handle, buffer, offset, nbytes, eof);
+        }
+
+        if (action == BUFFER_OUT_OF_RANGE) {
+
+          globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: offset %d out of range \n", __FUNCTION__, offset);
+          ceph_handle->cached_res = GLOBUS_FAILURE; //globus_l_gfs_make_error("write"); // GLOBUS_FAILURE;
+          ceph_handle->done = GLOBUS_TRUE;
+          ceph_handle->fileSize = 0;
+          globus_mutex_unlock(&ceph_handle->mutex);
+          return;
+
+        }
+        
+        buffering = GLOBUS_TRUE;
+      
+      }
 
       if (action == BUFFER_WRITE) {
+        
+        if (get_nbytes(ceph_handle) > 0) {
+          
+          a_buffer = get_buffer(ceph_handle);
+          a_offset = get_offset(ceph_handle);
+          a_nbytes = get_nbytes(ceph_handle);
+          
+        } else {
+          
+          a_buffer = buffer;
+          a_offset = offset;
+          a_nbytes = nbytes;
+                
+        }
 
-
-        start_offset = ceph_posix_lseek64(ceph_handle->fd, offset, SEEK_SET);
-        if (start_offset != offset) {
+        start_offset = ceph_posix_lseek64(ceph_handle->fd, a_offset, SEEK_SET);
+        if (start_offset != a_offset) {
           ceph_handle->cached_res = globus_l_gfs_make_error("seek");
           ceph_handle->done = GLOBUS_TRUE;
         } else {
 
-          bytes_written = ceph_posix_write(ceph_handle->fd, buffer, nbytes);
+          bytes_written = ceph_posix_write(ceph_handle->fd, a_buffer, a_nbytes);
 
           if (bytes_written < 0) {
+            
             globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: write error, return code %d \n", func, -bytes_written);
             ceph_handle->cached_res = GLOBUS_FAILURE; //globus_l_gfs_make_error("write"); // GLOBUS_FAILURE;
             ceph_handle->done = GLOBUS_TRUE;
             ceph_handle->fileSize = 0;
             globus_mutex_unlock(&ceph_handle->mutex);
             return;
+            
           } else {
 
-            int added_checksum = add_checksum_to_list(ceph_handle, buffer, offset, nbytes);
+            int added_checksum = add_checksum_to_list(ceph_handle, a_buffer, a_offset, a_nbytes);
             if (added_checksum == GLOBUS_FALSE) {
 
               ceph_handle->cached_res = GLOBUS_FAILURE;
@@ -957,7 +1010,7 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
 
             }
 
-            if ((globus_size_t) bytes_written < nbytes) {
+            if ((globus_size_t) bytes_written < a_nbytes) {
 
               errno = ENOSPC;
               ceph_handle->cached_res = globus_l_gfs_make_error("write");
@@ -966,8 +1019,14 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
 
             } else {
 
-              globus_gridftp_server_update_bytes_written(op, offset, nbytes);
+              globus_gridftp_server_update_bytes_written(op, a_offset, a_nbytes);
               ceph_handle->fileSize += bytes_written;
+              
+              if (buffering == GLOBUS_TRUE) { 
+                
+                flip_buffer(ceph_handle);
+                
+              }
 
             } // bytes_written == nbytes
 
@@ -978,7 +1037,7 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
 
       } // action == BUFFER_WRITE 
       
-    }
+    } // nbytes > 0
 
     globus_free(buffer);
     /* if not done just register the next one */
