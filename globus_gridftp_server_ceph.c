@@ -29,6 +29,8 @@
 
 #include "gridftp_checkaccess.h"
 
+#include "assert.h"
+
 
 #define  CA_MAXCKSUMLEN 32
 #define  CA_MAXCKSUMNAMELEN 15
@@ -316,32 +318,51 @@ static void globus_l_gfs_ceph_start(globus_gfs_operation_t op, globus_gfs_sessio
   ceph_handle->checksum_list_p = NULL;
   
   const char* confSize = "GRIDFTP_CEPH_MODE_E_WRITE_SIZE";
-  int buffsize = getconfigint(confSize);
-  const int lowpower = 20, highpower = 28, defaultpower = 26;
+  int rebuff_size = getconfigint(confSize);
+  const int lowpower = 20, highpower = 30, defaultpower = 26;
   
-  if (buffsize >= lowpower && buffsize <= highpower) {
-    buffsize = 1 << buffsize;
+  if (rebuff_size >= lowpower && rebuff_size <= highpower) {
+    rebuff_size = 1 << rebuff_size;
     globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
-      "%s: buffer size set to %d bytes\n", __FUNCTION__, buffsize);    
+      "%s: buffer size set to %d bytes\n", __FUNCTION__, rebuff_size);    
     
   } else {
-    buffsize = 1 << defaultpower;
+    rebuff_size = 1 << defaultpower;
     globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
       "%s: Invalid setting for %s, Range is %d to %d. Defaulting to 2^%d bytes (%d)\n",
-      func, confSize, lowpower, highpower, defaultpower, buffsize);
+      func, confSize, lowpower, highpower, defaultpower, rebuff_size);
   } 
 
   assembly_t * abuff = (assembly_t *)malloc(sizeof(assembly_t));
   
-  abuff->buffer = (globus_byte_t *)malloc(buffsize * sizeof(globus_byte_t)); 
-  abuff->offset = 0;
-  abuff->nbytes = 0;
-  abuff->capacity = buffsize;
+  ceph_handle->rebuff_size = rebuff_size;
+  ceph_handle->active_start = 0;
+  ceph_handle->active_end = rebuff_size-1; 
   
+  abuff->buffer = (globus_byte_t *)malloc(rebuff_size * sizeof(globus_byte_t)); 
+//  abuff->offset = 0;
+  abuff->nbytes = 0;
+
   ceph_handle->active_buff = abuff;
 
-  ceph_handle->active_start = 0;
-  ceph_handle->active_end = buffsize-1;  
+  assembly_t * obuff = (assembly_t *)malloc(sizeof(assembly_t));
+  
+  ceph_handle->overflow_start = rebuff_size;
+  ceph_handle->overflow_end = ceph_handle->overflow_start + rebuff_size-1;
+  
+  obuff->buffer = (globus_byte_t *)malloc(rebuff_size * sizeof(globus_byte_t)); 
+//  obuff->offset = ceph_handle->overflow_start;
+  obuff->nbytes = 0;
+
+  
+  ceph_handle->overflow_buff = obuff;
+
+  ceph_handle->nblocks_in_range = 0;
+  ceph_handle->nblocks_in_overflow = 0;
+
+
+  
+  
   globus_gridftp_server_operation_finished(op, GLOBUS_SUCCESS, &finished_info);
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: leaving.\n", func);  
 
@@ -755,104 +776,91 @@ int build_buffer(
 
     return BUFFER_OUT_OF_RANGE;
   }
-
-//  if (offset + nbytes > ceph_handle->overflow_end + 1) {
-//    return -1;
-//  }
   
-  assembly_t *abuff;
+  assembly_t *dest_buff;
 
   if (offset + nbytes - 1 <= ceph_handle->active_end) { // In ACTIVE range
     
-      globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: EOF=%s, Offset %d + nbytes-1 %d in range (%d - %d)\n", 
+      globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: EOF=%s, Offset %d + nbytes-1 %d in ACTIVE range (%d - %d)\n", 
         __FUNCTION__, eof ? "TRUE" : "FALSE", offset, nbytes-1, ceph_handle->active_start, ceph_handle->active_end);    
 
-    abuff = ceph_handle->active_buff;
-    int index = offset - abuff->offset;
-    memcpy(abuff->buffer+index, buffer, nbytes);
-    abuff->nbytes += nbytes;
+    dest_buff = ceph_handle->active_buff;
+    
+    int index = offset - ceph_handle->active_start; // dest_buff->offset;
+    memcpy(dest_buff->buffer+index, buffer, nbytes);
+    dest_buff->nbytes += nbytes;
+    
+    ++ceph_handle->nblocks_in_range;
 
-    if (abuff->nbytes == abuff->capacity || eof) {
+    if (dest_buff->nbytes == ceph_handle->rebuff_size || eof) {
       globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: Returning BUFFER_WRITE\n", __FUNCTION__);  
       return BUFFER_WRITE;
     } else {
       return BUFFER_CONTINUE;
     }
 
-  } else {
-    globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: Packet too early: Offset %d + nbytes-1 %d (%d) > active_end of %d \n",
-      __FUNCTION__, offset, (nbytes - 1), (offset + nbytes - 1), ceph_handle->active_end);
-    return BUFFER_OUT_OF_RANGE;
-  }
+  } else if (offset >= ceph_handle->overflow_start) {
 
+
+    if (offset + nbytes - 1 <= ceph_handle->overflow_end) { // in OVERFLOW range
+
+      globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: EOF=%s, Offset %d + nbytes-1 %d in OVERFLOW range (%d - %d)\n",
+        __FUNCTION__, eof ? "TRUE" : "FALSE", offset, nbytes - 1, ceph_handle->overflow_start, ceph_handle->overflow_end);
+
+      dest_buff = ceph_handle->overflow_buff;
+      
+      int index = offset - ceph_handle->overflow_start; // dest_buff->offset;
+      memcpy(dest_buff->buffer+index, buffer, nbytes);
+      dest_buff->nbytes += nbytes;
+
+      ++ceph_handle->nblocks_in_overflow;
+
+      if (dest_buff->nbytes == ceph_handle->rebuff_size) {
+        globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: OVERFLOW BUFFER FULL!! SHOULD NOT HAPPEN! -- Returning BUFFER_WRITE\n", __FUNCTION__);
+        return BUFFER_WRITE;
+      } else {
+        return BUFFER_CONTINUE;
+      }
+
+
+    } else { // Way past OVERFLOW end
+      
+      globus_gfs_log_message(GLOBUS_GFS_LOG_ERR,
+        "%s: Packet too early: Offset %d + nbytes-1 %d (%d) > overflow_end of %d \n",
+        __FUNCTION__, offset, (nbytes - 1), (offset + nbytes - 1), ceph_handle->overflow_end);
+
+      return BUFFER_OUT_OF_RANGE;
+    }
+
+  }
   
-//  else {                                              // In OVERFLOW range
-//    
-//    
-//    return -1;
-//    
-//    abuff = ceph_handle->rebuff[ceph_handle->overflow];
-//    int index = offset - abuff->offset;
-//    memcpy((void *)(abuff->buffer[index]), buffer, nbytes);
-//    abuff->nbytes += nbytes;
-//    
-//    return BUFFER_CONTINUE;
-//
-//  }
 }
 
 void flip_buffer(globus_l_gfs_ceph_handle_t * ceph_handle) {
   
-  assembly_t * abuff;
+  assembly_t * temp_buff = ceph_handle->active_buff;
   
-  abuff = ceph_handle->active_buff;
+  temp_buff->nbytes = 0;                        // We've just written data stored here
   
-  abuff->nbytes = 0;
-  abuff->offset += abuff->capacity;
-  ceph_handle->active_start += abuff->capacity;
-  ceph_handle->active_end += abuff->capacity;
+  ceph_handle->active_start = ceph_handle->overflow_start; 
+  ceph_handle->active_end = ceph_handle->overflow_end; 
   
-  globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: Offset increased to %d, active_start = %d, active_end =  %d \n",
-  __FUNCTION__, abuff->offset, ceph_handle->active_start, ceph_handle->active_end);
+  ceph_handle->overflow_start += ceph_handle->rebuff_size;                                        
+  ceph_handle->overflow_end += ceph_handle->rebuff_size;  
+    
+  ceph_handle->active_buff = ceph_handle->overflow_buff; // So we can start with the too-early blocks we've received
+  ceph_handle->overflow_buff = temp_buff;
+  
+   globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: ACTIVE BUFFER: active_start = %d, active_end =  %d \n",
+  __FUNCTION__, ceph_handle->active_start, ceph_handle->active_end); 
+   
+   globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: OVERFLOW BUFFER: overflow_start = %d, overflow_end =  %d \n",
+  __FUNCTION__, ceph_handle->overflow_start, ceph_handle->overflow_end); 
 
+   assert(ceph_handle->active_end == ceph_handle->overflow_start-1);
+   
 }
 
-int fill_checksum(
-  globus_l_gfs_ceph_handle_t * ceph_handle,
-  globus_byte_t * buffer,
-  globus_off_t offset,
-  size_t bytes_written) {
- 
-  unsigned long adler;
-
-  /* fill the checksum list  */
-  /* we will have a lot of checksums blocks in the list */
-  adler = adler32(0L, Z_NULL, 0);
-  adler = adler32(adler, buffer, bytes_written);
-
-  ceph_handle->checksum_list_p->next =
-    (checksum_block_list_t *) globus_malloc(sizeof (checksum_block_list_t));
-
-  if (ceph_handle->checksum_list_p->next == NULL) {
-    ceph_handle->cached_res = GLOBUS_FAILURE;
-    globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: malloc error \n", __FUNCTION__);
-    ceph_handle->done = GLOBUS_TRUE;
-    globus_mutex_unlock(&ceph_handle->mutex);
-    return 0;
-  }
-  ceph_handle->checksum_list_p->next->next = NULL;
-  ceph_handle->checksum_list_p->offset = offset;
-  ceph_handle->checksum_list_p->size = bytes_written;
-  ceph_handle->checksum_list_p->csumvalue = adler;
-  ceph_handle->checksum_list_p = ceph_handle->checksum_list_p->next;
-  ceph_handle->number_of_blocks++;
-  /* end of the checksum section */
-  return 1;
-
-}
-globus_off_t get_offset(globus_l_gfs_ceph_handle_t * ceph_handle) {
-  return ceph_handle->active_buff->offset;
-}
 
 globus_byte_t *get_buffer(globus_l_gfs_ceph_handle_t * ceph_handle) {
   return ceph_handle->active_buff->buffer;
@@ -862,10 +870,9 @@ globus_size_t get_nbytes(globus_l_gfs_ceph_handle_t * ceph_handle) {
   return ceph_handle->active_buff->nbytes;
 }
 
-globus_size_t get_capacity(globus_l_gfs_ceph_handle_t * ceph_handle) {
-  return ceph_handle->active_buff->capacity;
+globus_off_t get_offset(globus_l_gfs_ceph_handle_t * ceph_handle) {
+  return ceph_handle->active_start;
 }
-
 
 
 /* receive from client */
@@ -914,14 +921,21 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
     }
         
     ceph_handle->outstanding--;
+      globus_gfs_log_message(GLOBUS_GFS_LOG_INFO, "%s: just decremented outstanding\n", __FUNCTION__);
         
     if (result != GLOBUS_SUCCESS) {
       
       ceph_handle->cached_res = result;
       ceph_handle->done = GLOBUS_TRUE;
-      
-    } else if (nbytes > 0  || get_nbytes(ceph_handle) > 0) {
-      
+
+    } else if (nbytes > 0 || get_nbytes(ceph_handle) > 0) {
+
+
+
+      globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
+        "%s: About to check nbytes == 0 && get_nbytes() > 0\n", __FUNCTION__);
+
+
       int action;
       
       if (nbytes == 0 && get_nbytes(ceph_handle) > 0) {
@@ -930,7 +944,11 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
         
         action = BUFFER_WRITE;
         
-      }
+      } 
+
+
+            globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
+        "%s: About to assign buffers etc depending on buffering mode > 0\n", __FUNCTION__);
       
       int buffering = GLOBUS_FALSE;
       globus_byte_t *a_buffer;
@@ -938,17 +956,31 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
       globus_size_t a_nbytes;
       
       
-      if (nbytes > get_capacity(ceph_handle)) { // Can't fit incoming data into buffer
+      if (nbytes > ceph_handle->rebuff_size) { // Can't fit incoming data into buffer
+  
+
+        globus_gfs_log_message(GLOBUS_GFS_LOG_INFO, 
+          "%s: Buffer too large for re-assembly\n", __FUNCTION__);  
         
         action = BUFFER_WRITE;
         buffering = GLOBUS_FALSE;
         
       } else {
-        
-        if (nbytes > 0) {
-          action = build_buffer(ceph_handle, buffer, offset, nbytes, eof);
-        }
 
+        if (nbytes > 0) {
+
+
+          globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
+            "%s: Abbout to call build_buffer\n", __FUNCTION__);
+
+          action = build_buffer(ceph_handle, buffer, offset, nbytes, eof);
+
+          globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
+            "%s: Back frombuild_buffer\n", __FUNCTION__);
+          
+
+        }
+        
         if (action == BUFFER_OUT_OF_RANGE) {
 
           globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: offset %d out of range \n", __FUNCTION__, offset);
@@ -966,7 +998,7 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
 
       if (action == BUFFER_WRITE) {
         
-        if (get_nbytes(ceph_handle) > 0) {
+        if (get_nbytes(ceph_handle) > 0) { // Use the re-assembled buffer
           
           a_buffer = get_buffer(ceph_handle);
           a_offset = get_offset(ceph_handle);
@@ -1022,9 +1054,20 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
               globus_gridftp_server_update_bytes_written(op, a_offset, a_nbytes);
               ceph_handle->fileSize += bytes_written;
               
-              if (buffering == GLOBUS_TRUE) { 
-                
+              if (buffering == GLOBUS_TRUE) {
+
+
+                globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
+                  "%s: About to call flip_buffer\n", __FUNCTION__);
+
+
                 flip_buffer(ceph_handle);
+
+
+                globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
+                  "%s: Back from flip_buffer\n", __FUNCTION__);
+                
+
                 
               }
 

@@ -14,6 +14,11 @@ typedef struct checksum_block_list_s {
   struct checksum_block_list_s *next;
 } checksum_block_list_t;
 
+typedef struct assembly_s {
+    globus_byte_t *buffer;         // where to store the data
+    globus_size_t nbytes;           // how many bytes stored in this buffer so far
+} assembly_t;
+
 typedef struct globus_l_gfs_ceph_handle_s {
   globus_mutex_t mutex;
   int fd;
@@ -30,6 +35,14 @@ typedef struct globus_l_gfs_ceph_handle_s {
   checksum_block_list_t *checksum_list_p;
   unsigned long number_of_blocks;
   long long fileSize;
+  
+  unsigned long nblocks_in_range, nblocks_in_overflow;
+  
+  assembly_t *active_buff, *overflow_buff;
+  globus_size_t rebuff_size;
+  
+  globus_off_t active_start, active_end, overflow_start, overflow_end;
+      
 } globus_l_gfs_ceph_handle_t;
 
 /* a function to wrap all is needed to close a file */
