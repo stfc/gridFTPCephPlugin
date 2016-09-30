@@ -878,7 +878,7 @@ int ceph_posix_delete(const char *pathname) {
     std::map<unsigned int, CephFileRef>::iterator it = g_fds.find(fd);
     if (it != g_fds.end()) {
       CephFileRef &fr = it->second;
-#define VERYLOWLEVELTRACE
+//#define VERYLOWLEVELTRACE
 #ifdef VERYLOWLEVELTRACE     
       logwrapper((char*)"ceph_lseek64: for fd %d, offset=%lld, whence=%d\n", fd, offset, whence);
 #endif
