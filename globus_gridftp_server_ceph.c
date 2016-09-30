@@ -771,7 +771,7 @@ int build_buffer(
 
   if (offset < ceph_handle->active_start) {
     
-    globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: Offset %d < active_start of %d \n", 
+    globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: Offset %lld < active_start of %lld \n", 
       __FUNCTION__, offset, ceph_handle->active_start );
 
     return BUFFER_OUT_OF_RANGE;
@@ -781,8 +781,8 @@ int build_buffer(
 
   if (offset + nbytes - 1 <= ceph_handle->active_end) { // In ACTIVE range
     
-      globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: EOF=%s, Offset %d + nbytes-1 %d in ACTIVE range (%d - %d)\n", 
-        __FUNCTION__, eof ? "TRUE" : "FALSE", offset, nbytes-1, ceph_handle->active_start, ceph_handle->active_end);    
+//      globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: EOF=%s, Offset %lld + nbytes-1 %lld in ACTIVE range (%lld - %lld)\n", 
+//        __FUNCTION__, eof ? "TRUE" : "FALSE", offset, nbytes-1, ceph_handle->active_start, ceph_handle->active_end);    
 
     dest_buff = ceph_handle->active_buff;
     
@@ -804,8 +804,8 @@ int build_buffer(
 
     if (offset + nbytes - 1 <= ceph_handle->overflow_end) { // in OVERFLOW range
 
-      globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: EOF=%s, Offset %d + nbytes-1 %d in OVERFLOW range (%d - %d)\n",
-        __FUNCTION__, eof ? "TRUE" : "FALSE", offset, nbytes - 1, ceph_handle->overflow_start, ceph_handle->overflow_end);
+//      globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: EOF=%s, Offset %lld + nbytes-1 %lld in OVERFLOW range (%lld - %lld)\n",
+//        __FUNCTION__, eof ? "TRUE" : "FALSE", offset, nbytes - 1, ceph_handle->overflow_start, ceph_handle->overflow_end);
 
       dest_buff = ceph_handle->overflow_buff;
       
@@ -826,7 +826,7 @@ int build_buffer(
     } else { // Way past OVERFLOW end
       
       globus_gfs_log_message(GLOBUS_GFS_LOG_ERR,
-        "%s: Packet too early: Offset %d + nbytes-1 %d (%d) > overflow_end of %d \n",
+        "%s: Packet too early: Offset %lld + nbytes-1 %lld (%lld) > overflow_end of %lld \n",
         __FUNCTION__, offset, (nbytes - 1), (offset + nbytes - 1), ceph_handle->overflow_end);
 
       return BUFFER_OUT_OF_RANGE;
@@ -851,10 +851,10 @@ void flip_buffer(globus_l_gfs_ceph_handle_t * ceph_handle) {
   ceph_handle->active_buff = ceph_handle->overflow_buff; // So we can start with the too-early blocks we've received
   ceph_handle->overflow_buff = temp_buff;
   
-   globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: ACTIVE BUFFER: active_start = %d, active_end =  %d \n",
+   globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: ACTIVE BUFFER: active_start = %lld, active_end =  %lld \n",
   __FUNCTION__, ceph_handle->active_start, ceph_handle->active_end); 
    
-   globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: OVERFLOW BUFFER: overflow_start = %d, overflow_end =  %d \n",
+   globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: OVERFLOW BUFFER: overflow_start = %lld, overflow_end =  %lld \n",
   __FUNCTION__, ceph_handle->overflow_start, ceph_handle->overflow_end); 
 
    assert(ceph_handle->active_end == ceph_handle->overflow_start-1);
@@ -901,9 +901,9 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
 
   if (!strcmp(getdebug(), "1")) {
 
-    globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
-      "%s\n\tEOF = %s, offset = %d, nbytes = %d\n", 
-      __FUNCTION__, eof ? "TRUE" : "FALSE", offset, nbytes);
+//    globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
+//      "%s\n\tEOF = %s, offset = %lld, nbytes = %d\n", 
+//      __FUNCTION__, eof ? "TRUE" : "FALSE", offset, nbytes);
     
     if (nbytes != last_nbytes) {
       globus_gfs_log_message(GLOBUS_GFS_LOG_INFO, "%s: nbytes was previously %d\n", __FUNCTION__, last_nbytes);
@@ -921,7 +921,6 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
     }
         
     ceph_handle->outstanding--;
-      globus_gfs_log_message(GLOBUS_GFS_LOG_INFO, "%s: just decremented outstanding\n", __FUNCTION__);
         
     if (result != GLOBUS_SUCCESS) {
       
@@ -929,12 +928,6 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
       ceph_handle->done = GLOBUS_TRUE;
 
     } else if (nbytes > 0 || get_nbytes(ceph_handle) > 0) {
-
-
-
-      globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
-        "%s: About to check nbytes == 0 && get_nbytes() > 0\n", __FUNCTION__);
-
 
       int action;
       
@@ -945,10 +938,6 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
         action = BUFFER_WRITE;
         
       } 
-
-
-            globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
-        "%s: About to assign buffers etc depending on buffering mode > 0\n", __FUNCTION__);
       
       int buffering = GLOBUS_FALSE;
       globus_byte_t *a_buffer;
@@ -969,21 +958,13 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
 
         if (nbytes > 0) {
 
-
-          globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
-            "%s: Abbout to call build_buffer\n", __FUNCTION__);
-
           action = build_buffer(ceph_handle, buffer, offset, nbytes, eof);
-
-          globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
-            "%s: Back frombuild_buffer\n", __FUNCTION__);
-          
 
         }
         
         if (action == BUFFER_OUT_OF_RANGE) {
 
-          globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: offset %d out of range \n", __FUNCTION__, offset);
+          globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: offset %lld out of range \n", __FUNCTION__, offset);
           ceph_handle->cached_res = GLOBUS_FAILURE; //globus_l_gfs_make_error("write"); // GLOBUS_FAILURE;
           ceph_handle->done = GLOBUS_TRUE;
           ceph_handle->fileSize = 0;
@@ -993,6 +974,9 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
         }
         
         buffering = GLOBUS_TRUE;
+        
+        globus_gridftp_server_update_bytes_written(op, offset, nbytes);
+      
       
       }
 
@@ -1051,25 +1035,19 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
 
             } else {
 
-              globus_gridftp_server_update_bytes_written(op, a_offset, a_nbytes);
               ceph_handle->fileSize += bytes_written;
               
               if (buffering == GLOBUS_TRUE) {
 
-
-                globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
-                  "%s: About to call flip_buffer\n", __FUNCTION__);
-
-
                 flip_buffer(ceph_handle);
 
-
-                globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
-                  "%s: Back from flip_buffer\n", __FUNCTION__);
+              } else {
                 
-
-                
+                globus_gridftp_server_update_bytes_written(op, a_offset, a_nbytes);
+                               
               }
+              
+              
 
             } // bytes_written == nbytes
 
