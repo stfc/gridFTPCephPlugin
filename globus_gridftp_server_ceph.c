@@ -51,7 +51,25 @@ globus_version_t local_version = {
 };
 
 
-char* remove_prefix(char* in, const char* prefix);
+char *cleanup_pathname(char *instr) {
+  
+  char *out;
+  
+  if (instr[0] == '/') {  // Zap a leading forward slash
+    instr++;
+  }
+  
+  if (strchr(instr, '/') == NULL) { // If no other slashes, add one at end
+    out = (char *)malloc(strlen(instr) + 2);
+    strcpy(out, instr);
+    strcat(out, "/");
+  } else {
+    out = (char *)malloc(strlen(instr)+1);
+    strcpy(out, instr);
+  }
+  
+  return out;
+}
 
 static char* VO_Role;
 /*
@@ -155,6 +173,7 @@ static unsigned long adler32_combine_(unsigned int adler1,
 static unsigned long adler32_0chunks(unsigned int len) {
   return ((len%BASE) << 16) | 1;
 }
+
 
 static void ceph_logfunc_wrapper (char *format, va_list argp) {
   // do the printing ourselves as we cannot call the variadic globus_gfs_log_message
@@ -319,7 +338,7 @@ static void globus_l_gfs_ceph_start(globus_gfs_operation_t op, globus_gfs_sessio
   
   const char* confSize = "GRIDFTP_CEPH_MODE_E_WRITE_SIZE";
   int rebuff_size = getconfigint(confSize);
-  const int lowpower = 20, highpower = 30, defaultpower = 26;
+  const int lowpower = 20, highpower = 30, defaultpower = 29;
   
   if (rebuff_size >= lowpower && rebuff_size <= highpower) {
     rebuff_size = 1 << rebuff_size;
@@ -359,13 +378,16 @@ static void globus_l_gfs_ceph_start(globus_gfs_operation_t op, globus_gfs_sessio
 
   ceph_handle->nblocks_in_range = 0;
   ceph_handle->nblocks_in_overflow = 0;
-
-
   
+
+//
+//  globus_off_t bytes_allocated;
+//  
+//  globus_result_t res = globus_gridftp_server_control_get_allocated(op, &bytes_allocated);
   
   globus_gridftp_server_operation_finished(op, GLOBUS_SUCCESS, &finished_info);
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: leaving.\n", func);  
-
+  
 }
 
 /*************************************************************************
@@ -403,7 +425,7 @@ static void globus_l_gfs_ceph_stat(globus_gfs_operation_t op,
   
   GlobusGFSName(globus_l_gfs_ceph_stat);
   
-  char* pathname_to_test = remove_prefix(stat_info->pathname, "/");
+  char* pathname_to_test = cleanup_pathname(stat_info->pathname);
   
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s: %s\n",
                          func, stat_info->pathname);
@@ -513,9 +535,9 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
   
   globus_result_t                     result;
   int allowed;
-  char errormessage[256];
+  char errormessage[ERRORMSGSIZE];
 
-  char* pathname_to_test = remove_prefix(cmd_info->pathname, "/");
+  char* pathname_to_test = cleanup_pathname(cmd_info->pathname);
 
 
   switch (cmd_info->command) {
@@ -1213,20 +1235,23 @@ static void globus_l_gfs_ceph_read_from_net
   }
 }
     
-char* remove_prefix(char* in, const char* inital) {
-  
-  char *out;
-  if (!strncmp(in, inital, strlen(inital))) {
-    out = (char *)malloc(strlen(in));  
-    strcpy(out, in+1);
-  } else {
-    out = (char *)malloc(strlen(in) + 1);  
-    strcpy(out, in);
-  }
-  
-  return out;
-  
-}
+//char* cleanup_pathname(char* in, const char* inital) {
+//  
+//  char *out;
+//  if (!strncmp(in, inital, strlen(inital))) {
+//    out = (char *)malloc(strlen(in));  
+//    strcpy(out, in+1);
+//  } else {
+//    out = (char *)malloc(strlen(in) + 1);  
+//    strcpy(out, in);
+//  }
+//  
+//  return out;
+//  
+//}
+
+
+
 /*************************************************************************
  *  recv
  *  ----
@@ -1266,7 +1291,7 @@ static void globus_l_gfs_ceph_recv(globus_gfs_operation_t op,
   GlobusGFSName(globus_l_gfs_ceph_recv);
   ceph_handle = (globus_l_gfs_ceph_handle_t *) user_arg;
   
-  char* pathname_to_test = remove_prefix(transfer_info->pathname, "/");
+  char* pathname_to_test = cleanup_pathname(transfer_info->pathname);
 
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
           "%s: started for %s\n", func, pathname_to_test);
@@ -1301,7 +1326,6 @@ static void globus_l_gfs_ceph_recv(globus_gfs_operation_t op,
     return;
   }
  
-  
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: pathname now: %s \n",func,pathname);
   globus_size_t block_size;
   globus_gridftp_server_get_block_size(op, &block_size);
@@ -1422,7 +1446,7 @@ static void globus_l_gfs_ceph_send(globus_gfs_operation_t op,
   char * func="globus_l_gfs_ceph_send";
  // char * pathname;
   
-  const char* pathname_to_test = remove_prefix(transfer_info->pathname, "/");
+  const char* pathname_to_test = cleanup_pathname(transfer_info->pathname);
   
 
   globus_bool_t done;
