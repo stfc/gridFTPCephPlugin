@@ -573,7 +573,7 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
           globus_gfs_log_message(GLOBUS_GFS_LOG_ERR,
             "DELE return code is %d\n", status); // Log the actual failure reason... 
           errno = ENOENT; // but tell the client that target doesn't exist.
-          globus_gridftp_server_finished_command(op, GLOBUS_SUCCESS, GLOBUS_NULL);
+          globus_gridftp_server_finished_command(op, GLOBUS_SUCCESS, GLOBUS_NULL);  // TO-DO: Should be GLOBUS_FAILURE
         } else {
           errno = 0;
           globus_gridftp_server_finished_command(op, GLOBUS_SUCCESS, GLOBUS_NULL);
