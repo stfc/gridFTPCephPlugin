@@ -849,7 +849,13 @@ int ceph_posix_delete(const char *pathname) {
   char *ceph_posix_get_checksum(const char* pathname) {
 
     char *checksum = NULL;
-    int fd = ceph_posix_open(pathname, O_RDONLY, 0);
+    int fd = ceph_posix_open(pathname, O_RDONLY, 0); // Sh
+    
+    if (fd < 0) {
+      return NULL;
+
+    }    
+    
     char ckSumbufdisk[CA_MAXCKSUMLEN + 1];
     int xattr_len;
     /*

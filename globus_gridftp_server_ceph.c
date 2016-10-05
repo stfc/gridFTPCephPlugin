@@ -662,8 +662,17 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
         //      cksm_offset = cmd_info->cksm_offset;
         //      /** length of data to read for cksm command   -1 means full file */
         //      cksm_length = cmd_info->cksm_length;
-        char *checksum = ceph_posix_get_checksum(cmd_info->pathname);
-        globus_gridftp_server_finished_command(op, GLOBUS_SUCCESS, checksum);
+        char *checksum = ceph_posix_get_checksum(cmd_info->pathname);  // TO-DO: Should check for error status
+
+        globus_result_t result;
+        if (checksum == NULL) { // [0] == '-') {
+          errno = ENOENT;
+          result = globus_l_gfs_make_error("checksum: open");
+        } else {
+          errno = 0;
+          result = GLOBUS_SUCCESS;
+        }
+        globus_gridftp_server_finished_command(op, result, checksum);
 
       }
       return;
