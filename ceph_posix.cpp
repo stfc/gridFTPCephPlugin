@@ -300,24 +300,58 @@ static void getCephObjectSize(const std::string &params, unsigned int offset, un
 void fillCephFileParams(const std::string &params, CephFile &file) {    
   // parse the params one by one
     
+  
+  logwrapper((char*)"%s: params = %s.\n", __FUNCTION__, params.c_str());
+  
+  file.pool = params;
+  
 //  std::string pool;
 //  unsigned int nbStripes;
 //  unsigned long long stripeUnit, objectSize;
   
-  unsigned int afterUser = getCephUserId(params); // We don't assign userId from params
-  unsigned int afterPool = getCephPool(params, afterUser, file.pool); 
-  unsigned int afterNbStripes = getCephNbStripes(params, afterPool, &file.nbStripes);
-  unsigned int afterStripeUnit = getCephStripeUnit(params, afterNbStripes, &file.stripeUnit);
-  getCephObjectSize(params, afterStripeUnit, &file.objectSize);
-    
-  if (file.pool.empty()) { // E.g. Calls from FTS after initial MLST will generally not
-                      // not provide the pool name, so we need to pick up the pool
-                      // from the value we stored before
-    if (!strcmp("1", getdebug())) {      
-      logwrapper((char*)"%s : Ceph pool is empty - OK for 'MKD /'\n", 
-            __FUNCTION__);  
-    }
-  } 
+//  unsigned int afterUser = getCephUserId(params); // We don't assign userId from params
+//  unsigned int afterPool = getCephPool(params, afterUser, file.pool); 
+  
+  int numStripes;
+  char *numStripesStr = getenv("STRIPER_NUM_STRIPES");
+  if (numStripesStr == NULL) {
+    numStripes = g_defaultParams.nbStripes;
+  } else {
+    numStripes = atoi(numStripesStr);
+  }
+  
+  int stripeUnit;
+  char *stripeUnitStr = getenv("STRIPER_STRIPE_UNIT");
+  if (stripeUnitStr == NULL) {
+    stripeUnit = g_defaultParams.stripeUnit;
+  } else {
+    stripeUnit = atoi(stripeUnitStr);
+  }
+  
+  int objectSize;
+  char *objectSizeStr = getenv("STRIPER_OBJECT_SIZE");
+  if (objectSizeStr == NULL) {
+    objectSize = g_defaultParams.objectSize;
+  } else {
+    objectSize = atoi(objectSizeStr);
+  }
+
+  file.nbStripes = numStripes;
+  file.stripeUnit = stripeUnit;
+  file.objectSize = objectSize;
+  
+//  unsigned int afterNbStripes = getCephNbStripes(params, afterPool, &file.nbStripes);
+//  unsigned int afterStripeUnit = getCephStripeUnit(params, afterNbStripes, &file.stripeUnit);
+//  getCephObjectSize(params, afterStripeUnit, &file.objectSize);
+//    
+//  if (file.pool.empty()) { // E.g. Calls from FTS after initial MLST will generally not
+//                      // not provide the pool name, so we need to pick up the pool
+//                      // from the value we stored before
+//    if (!strcmp("1", getdebug())) {      
+//      logwrapper((char*)"%s : Ceph pool is empty - OK for 'MKD /'\n", 
+//            __FUNCTION__);  
+//    }
+//  } 
 
   file.radosUserId.assign(radosUserId);
   
