@@ -992,7 +992,7 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
           action = build_buffer(ceph_handle, buffer, offset, nbytes, eof);
 
         }
-        
+
         if (action == BUFFER_OUT_OF_RANGE) {
 
           globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: offset %lld out of range \n", __FUNCTION__, offset);
@@ -1000,6 +1000,13 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
           ceph_handle->done = GLOBUS_TRUE;
           ceph_handle->fileSize = 0;
           globus_mutex_unlock(&ceph_handle->mutex);
+
+
+          errno = ENOENT;
+          result = globus_l_gfs_make_error("data stream overflows buffer");
+
+          globus_gridftp_server_finished_transfer(op, result);
+
           return;
 
         }
@@ -1035,7 +1042,7 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
 
           bytes_written = ceph_posix_write(ceph_handle->fd, a_buffer, a_nbytes);
 
-          if (bytes_written < 0) {
+          if (bytes_written < 0) { // TO-DO: call transfer_finished here
             
             globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: write error, return code %d \n", func, -bytes_written);
             ceph_handle->cached_res = GLOBUS_FAILURE; //globus_l_gfs_make_error("write"); // GLOBUS_FAILURE;
