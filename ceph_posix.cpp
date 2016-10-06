@@ -116,181 +116,6 @@ static unsigned int stoui(const std::string &s) {
   return (unsigned int)res;
 }
 
-/// fills the userId of a ceph file struct from the userId from the grid-mapfile
-/// returns position of first character after the userId
-static int getCephUserId(const std::string &params) {
-    
-  if (!strcmp(getdebug(), "9")) {
-    logwrapper((char*)"%s : params = %s\n", __FUNCTION__, params.c_str());
-  }   
-
-  size_t atPos = params.find('@');
- 
-  if (std::string::npos != atPos) {  
-    return atPos+1;
-  } else {
-    return 0;
-  }
-}
-
-/// fills the pool of a ceph file struct from a string
-/// returns position of first character after the pool
-
-static int getCephPool(const std::string &params, unsigned int offset, std::string &pool) {
-
-  if (!strcmp(getdebug(), "9")) {
-    logwrapper((char*) "%s: params='%s', using %s\n", __FUNCTION__,
-            params.c_str(), params.substr(offset).c_str()); // This duplicates info from stat() in the calling code)
-  }
-  // default
-  // parsing
-  size_t comPos = params.find(',', offset);
-  if (std::string::npos == comPos) {
-    if (params.size() != offset) {
-      int colonPos = params.find(':');
-      pool = params.substr(offset, colonPos - offset);
-      if (!strcmp(getdebug(), "9")) {
-        logwrapper((char*) "%s : No comma, pool = %s, returning position %d\n",
-                __FUNCTION__, pool.c_str(), params.size());
-      }
-    }
-    return params.size();
-  } else {
-    pool = params.substr(offset, comPos - offset);
-
-
-    if (!strcmp(getdebug(), "9")) {
-      logwrapper((char*) "%s : Found comma, pool = %s, return %d\n",
-              __FUNCTION__, pool.c_str(), comPos + 1);
-    }
-    return comPos + 1;
-  }
-}
-
-/// fills the nbStriped of a ceph file struct from a string
-/// returns position of first character after the nbStripes
-// this may raise std::invalid_argument and std::out_of_range
-static int getCephNbStripes(const std::string &params, unsigned int offset, unsigned int* nbStripes) {
-    if (!strcmp(getdebug(), "9")) {
-      logwrapper((char*)"%s : params = '%s', params.size() = %d, offset = %d\n", 
-              __FUNCTION__,  params.c_str(), params.size(), offset);
-    }      
-  // default
-  // parsing
-  size_t comPos = params.find(',', offset);
-  if (std::string::npos == comPos) {   
-    if (params.size() != offset) {
-      if (!strcmp(getdebug(), "9")) {
-        logwrapper((char*)"%s : params.size() != offset\n", __FUNCTION__);
-      }     
-         
-      size_t colonPos = params.find(':');
-      std::string remainder = params.substr(offset, colonPos-offset);
-         
-      if (remainder.size() > 0) {
-      
-        if (!strcmp(getdebug(), "9")) {
-          logwrapper((char*)"%s : remainder = %s\n", __FUNCTION__, remainder.c_str());
-         }       
-        
-        *nbStripes = stoui(params.substr(offset));
-        if (!strcmp(getdebug(), "9")) {
-          logwrapper((char*)"%s : setting nbStripes to %d\n", __FUNCTION__, *nbStripes);
-        }
-      }
-    } else {
-      *nbStripes = g_defaultParams.nbStripes;
-      if (!strcmp(getdebug(), "9")) {
-        logwrapper((char*)"%s : setting nbStripes to default, = %d\n", __FUNCTION__, *nbStripes);
-      }      
-      return params.size();
-    }
-  } else {
-    *nbStripes = stoui(params.substr(offset, comPos-offset));
-    if (!strcmp(getdebug(), "9")) {
-      logwrapper((char*)"%s : nbStripes = %d\n", __FUNCTION__,  *nbStripes);
-    }    
-    return comPos+1;
-  }
-}
-
-/// fills the stripeUnit of a ceph file struct from a string
-/// returns position of first character after the stripeUnit
-// this may raise std::invalid_argument and std::out_of_range
-static int getCephStripeUnit(const std::string &params, unsigned int offset, unsigned long long* stripeUnit) {
-    
-  if (!strcmp("9", getdebug())) {
-    logwrapper((char*)"%s : params+offset = '%s'\n", __FUNCTION__, params.substr(offset).c_str());
-  }    
-  // default
-  // parsing
-  size_t comPos = params.find(',', offset);
-  if (std::string::npos == comPos) {
-    if (params.size() != offset) {
-      *stripeUnit = stoull(params.substr(offset));
-        if (!strcmp(getdebug(), "9")) {
-          logwrapper((char*)"%s : params.size() != offset, stripeUnit = %d\n", __FUNCTION__, *stripeUnit);
-        }
-    } else {
-      *stripeUnit = g_defaultParams.stripeUnit;
-      
-      if (!strcmp("9", getdebug())) {
-        logwrapper((char*)"%s : stripeUnit = %u, returning %d\n",
-              __FUNCTION__, *stripeUnit, params.size());
-      }      
-    }
-    return params.size();
-  } else {
-    std::string stripeUnitStr = params.substr(offset, comPos-offset);
-    if (!strcmp("9", getdebug())) {
-      logwrapper((char*)"%s : stripeUnit to convert = %s, offset = %d\n", __FUNCTION__, stripeUnitStr.c_str());
-    }     
-    *stripeUnit = stoull(stripeUnitStr); // /* params.substr(offset, comPos-offset) */);
-    if (!strcmp("9", getdebug())) {
-      logwrapper((char*)"%s : stripeUnit = %u, returning %d\n",
-              __FUNCTION__, *stripeUnit, comPos+1);
-    }
-    return comPos+1;
-  }
-}
-
-/// fills the objectSize of a ceph file struct from a string
-/// returns position of first character after the objectSize
-// this may raise std::invalid_argument and std::out_of_range
-static void getCephObjectSize(const std::string &params, unsigned int offset, unsigned long long *objectSize) {
-    
-  if (!strcmp("9", getdebug())) {
-    logwrapper((char*)"%s : params = '%s', using '%s', params.size() - %d, offset = %d\n", 
-            __FUNCTION__, params.c_str(), params.substr(offset).c_str(),
-            params.size(), offset);
-  }   
-    // default
-  // parsing
-  if (params.size() != offset) {
-    size_t colonPos = params.find(':', offset);
-      
-    if (std::string::npos == colonPos) {
-      if (!strcmp("9", getdebug())) {
-        logwrapper((char*)"%s : No colon found\n", __FUNCTION__);
-      } 
-      *objectSize = stoull(params.substr(offset));
-    } else {
-      std::string objectSizeStr = params.substr(offset, colonPos-offset);
-      if (!strcmp("9", getdebug())) {
-        logwrapper((char*)"%s : String objectSize = %s\n", __FUNCTION__, objectSizeStr.c_str());
-      }
-      *objectSize = stoull(objectSizeStr);
-    }
-    if (!strcmp("9", getdebug())) {
-      logwrapper((char*)"%s : objectSize = %d\n", __FUNCTION__, *objectSize);
-    }   
-  } else {
-    *objectSize = g_defaultParams.objectSize;
-  }
-  if (!strcmp("9", getdebug())) {
-    logwrapper((char*)"%s : objectSize = %d\n", __FUNCTION__, *objectSize);
-  }  
-}
 
 
 
@@ -305,19 +130,12 @@ void fillCephFileParams(const std::string &params, CephFile &file) {
   
   file.pool = params;
   
-//  std::string pool;
-//  unsigned int nbStripes;
-//  unsigned long long stripeUnit, objectSize;
-  
-//  unsigned int afterUser = getCephUserId(params); // We don't assign userId from params
-//  unsigned int afterPool = getCephPool(params, afterUser, file.pool); 
-  
   int numStripes;
   char *numStripesStr = getenv("STRIPER_NUM_STRIPES");
   if (numStripesStr == NULL) {
     numStripes = g_defaultParams.nbStripes;
   } else {
-    numStripes = atoi(numStripesStr);
+    numStripes = atoi(numStripesStr);  // Could use stoui from this file...
   }
   
   int stripeUnit;
@@ -339,27 +157,7 @@ void fillCephFileParams(const std::string &params, CephFile &file) {
   file.nbStripes = numStripes;
   file.stripeUnit = stripeUnit;
   file.objectSize = objectSize;
-  
-//  unsigned int afterNbStripes = getCephNbStripes(params, afterPool, &file.nbStripes);
-//  unsigned int afterStripeUnit = getCephStripeUnit(params, afterNbStripes, &file.stripeUnit);
-//  getCephObjectSize(params, afterStripeUnit, &file.objectSize);
-//    
-//  if (file.pool.empty()) { // E.g. Calls from FTS after initial MLST will generally not
-//                      // not provide the pool name, so we need to pick up the pool
-//                      // from the value we stored before
-//    if (!strcmp("1", getdebug())) {      
-//      logwrapper((char*)"%s : Ceph pool is empty - OK for 'MKD /'\n", 
-//            __FUNCTION__);  
-//    }
-//  } 
-
   file.radosUserId.assign(radosUserId);
-  
-//
-//  file.pool = pool;
-//  file.nbStripes = nbStripes;
-//  file.stripeUnit = stripeUnit;
-//  file.objectSize = objectSize;
  
   if (!strcmp("1", getdebug())) {
     logwrapper((char*)"%s : radosUserID = %s, pool = %s, name = %s, nbStripes = %d, stripeUnit = %d, objectSize = %d\n", 
