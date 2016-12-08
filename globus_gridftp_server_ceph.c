@@ -31,8 +31,8 @@
 
 #include "assert.h"
 
-
-#define  CA_MAXCKSUMLEN 32
+// Adler32 checksum length is 8 characters
+#define  CA_MAXCKSUMLEN 8
 #define  CA_MAXCKSUMNAMELEN 15
 
 char *authdbFilename;
@@ -311,7 +311,12 @@ static void globus_l_gfs_ceph_start(globus_gfs_operation_t op, globus_gfs_sessio
     globus_gridftp_server_operation_finished(op, GLOBUS_FAILURE, &finished_info);
 
     return;
-  } 
+  } else {
+    
+      globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s: GRIDFTP_CEPH_AUTHDB_FILE = %s\n",
+      func, authdbFilename);
+    
+  }
 
   const char* radosUserKey = "GRIDFTP_CEPH_RADOS_USER";
   const char* radosUserId = getenv(radosUserKey);
@@ -326,10 +331,24 @@ static void globus_l_gfs_ceph_start(globus_gfs_operation_t op, globus_gfs_sessio
 
     return; 
 
+  } else {
+    
+      globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s: RADOS USER ID = %s\n",
+      func, radosUserId);    
+    
   }
   
   ceph_posix_set_radosUserId(radosUserId);
+ 
+
+  globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s: session_info->username = %s\n",
+      func, session_info->username); 
+
+  
   VO_Role = strdup(session_info->username);
+
+  globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s: VO_Role = %s\n",
+      func, VO_Role); 
   
   set_finished_info(&finished_info, session_info, ceph_handle, GLOBUS_SUCCESS);
  
@@ -337,6 +356,10 @@ static void globus_l_gfs_ceph_start(globus_gfs_operation_t op, globus_gfs_sessio
   ceph_handle->checksum_list_p = NULL;
   
   const char* confSize = "GRIDFTP_CEPH_MODE_E_WRITE_SIZE";
+  
+  globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s: GRIDFTP_CEPH_MODE_E_WRITE_SIZE = %s\n",
+      func, confSize); 
+  
   int rebuff_size = getconfigint(confSize);
   const int lowpower = 20, highpower = 30, defaultpower = 29;
   
@@ -611,7 +634,8 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
       allowed = checkAccess(authdbProg, authdbFilename, VO_Role, "wr", pathname_to_test);
 
       if (!allowed) {
-        sprintf(errormessage, "Authorization error: MKD operation for role %s not allowed on %s", 
+        snprintf(errormessage, ERRORMSGSIZE,
+                "Authorization error: MKD operation for role %s not allowed on %s", 
           VO_Role, cmd_info->pathname);
         result = GlobusGFSErrorGeneric(errormessage);
         globus_gridftp_server_finished_command(op, result, errormessage);
@@ -1151,10 +1175,10 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
           return;
         }
         
-        sprintf(ckSumbuf, "%lx", file_checksum);
+        snprintf(ckSumbuf, CA_MAXCKSUMLEN+1, "%08lx", file_checksum);    // Keep leading zeroes
         
-        globus_gfs_log_message(GLOBUS_GFS_LOG_INFO, "%s: checksum for fd %d : AD 0x%lx\n",
-                               func,ceph_handle->fd, file_checksum);
+        globus_gfs_log_message(GLOBUS_GFS_LOG_INFO, "%s: checksum for fd %d : AD %s\n",
+                               func,ceph_handle->fd, ckSumbuf); // Log the checksum string we're storing
         globus_free(checksum_array);
         free_checksum_list(ceph_handle->checksum_list);
         /* set extended attributes */
@@ -1696,7 +1720,7 @@ static globus_bool_t globus_l_gfs_ceph_send_next_to_client
       file_checksum=adler32_combine_(file_checksum,checksum_array[i]->csumvalue,
                                      checksum_array[i]->size);
     }
-    globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,"%s: checksum for fd %d : AD 0x%lx\n",
+    globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,"%s: checksum for fd %d : AD %08lx\n",
                            func,ceph_handle->fd,file_checksum);
     globus_free(checksum_array);
     free_checksum_list(ceph_handle->checksum_list);
@@ -1722,8 +1746,9 @@ static globus_bool_t globus_l_gfs_ceph_send_next_to_client
             globus_gridftp_server_finished_transfer(ceph_handle->op,
                                                     ceph_handle->cached_res);
           }
-          char errorBuf[1024];
-          sprintf(errorBuf, "error detected while reading checksum for fd: %d, errono=%d\n", ceph_handle->fd, -xattr_len);
+          char errorBuf[ERRORMSGSIZE];
+          (void)snprintf(errorBuf, ERRORMSGSIZE,
+                  "error detected while reading checksum for fd: %d, errono=%d\n", ceph_handle->fd, -xattr_len);
           globus_ceph_close(func, ceph_handle, errorBuf);
           return ceph_handle->done;
         } else {
@@ -1735,12 +1760,13 @@ static globus_bool_t globus_l_gfs_ceph_send_next_to_client
       }
 
     if (useCksum) { /* we have disks and on the fly checksums here */
-      sprintf(ckSumbuf, "%lx", file_checksum);
+      snprintf(ckSumbuf, CA_MAXCKSUMLEN+1, "%08lx", file_checksum); // Format computed checksum same way as stored (disk) checksum
       if (strncmp(ckSumbufdisk,ckSumbuf,CA_MAXCKSUMLEN)==0) {
         globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: checksums OK! \n",func);
       } else {
-        char errorBuf[1024];
-        sprintf(errorBuf, "checksum error detected reading fd: %d (recorded checksum: 0x%s calculated checksum: 0x%s)\n",
+        char errorBuf[ERRORMSGSIZE];
+        (void)snprintf(errorBuf, ERRORMSGSIZE,
+                "checksum error detected reading fd: %d (recorded checksum: 0x%s calculated checksum: 0x%s)\n",
                 ceph_handle->fd,
                 ckSumbufdisk,
                 ckSumbuf);

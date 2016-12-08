@@ -436,7 +436,7 @@ extern "C" {
     
     void ceph_posix_set_radosUserId(const char* radosUser) {
     
-      if (!strcmp(getdebug(), "9")) {
+      if (!strcmp(getdebug(), "1")) {
         logwrapper((char*) "%s : %s\n", __FUNCTION__, radosUser);
       }
       radosUserId.assign(radosUser);
