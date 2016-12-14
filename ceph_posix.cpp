@@ -67,15 +67,14 @@ std::multiset<std::string> g_filesOpenForWrite;
 /// global variable remembering the next available file descriptor
 unsigned int g_nextCephFd = 0;
 /// global variable containing defaults for CephFiles
-CephFile g_defaultParams = { "",
-                             "default",        // default pool
-                             "xrootd",          // default user
-                             1,                // default nbStripes
+CephFile g_defaultParams = { "",                // object name
+                             "",                // default pool
+                             "",                // default user
+                             1,                 // default nbStripes
                              4 * 1024 * 1024,  // default stripeUnit : 4 MB
                              4 * 1024 * 1024}; // default objectSize : 4 MB
 
 std::string radosUserId;
-//std::string g_defaultPool = "default";
 
 /// global variable for the log function
 static void (*g_logfunc) (char *, va_list argp) = 0;
