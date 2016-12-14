@@ -288,11 +288,11 @@ static void globus_l_gfs_ceph_start(globus_gfs_operation_t op, globus_gfs_sessio
   GlobusGFSName(globus_l_gfs_ceph_start);
   ceph_handle = (globus_l_gfs_ceph_handle_t *)
     globus_malloc(sizeof (globus_l_gfs_ceph_handle_t));
-  globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s: started, uid: %u, gid: %u\n",
+  globus_gfs_log_message(GLOBUS_GFS_LOG_INFO, "%s: started, uid: %u, gid: %u\n",
     func, getuid(), getgid());
   globus_mutex_init(&ceph_handle->mutex, NULL);
 
-  globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s: host_id = %s, mapped rolename = %s\n",
+  globus_gfs_log_message(GLOBUS_GFS_LOG_INFO, "%s: host_id = %s, mapped rolename = %s\n",
     func, session_info->host_id, session_info->username);
     
   authdbProg = checkFileFromConf("GRIDFTP_CEPH_AUTHDB_PROG", "/usr/bin/xrdacctest");
@@ -313,7 +313,7 @@ static void globus_l_gfs_ceph_start(globus_gfs_operation_t op, globus_gfs_sessio
     return;
   } else {
     
-      globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s: GRIDFTP_CEPH_AUTHDB_FILE = %s\n",
+      globus_gfs_log_message(GLOBUS_GFS_LOG_INFO, "%s: GRIDFTP_CEPH_AUTHDB_FILE = %s\n",
       func, authdbFilename);
     
   }
@@ -341,13 +341,13 @@ static void globus_l_gfs_ceph_start(globus_gfs_operation_t op, globus_gfs_sessio
   ceph_posix_set_radosUserId(radosUserId);
  
 
-  globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s: session_info->username = %s\n",
+  globus_gfs_log_message(GLOBUS_GFS_LOG_INFO, "%s: session_info->username = %s\n",
       func, session_info->username); 
 
   
   VO_Role = strdup(session_info->username);
 
-  globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s: VO_Role = %s\n",
+  globus_gfs_log_message(GLOBUS_GFS_LOG_INFO, "%s: VO_Role = %s\n",
       func, VO_Role); 
   
   set_finished_info(&finished_info, session_info, ceph_handle, GLOBUS_SUCCESS);
@@ -357,20 +357,22 @@ static void globus_l_gfs_ceph_start(globus_gfs_operation_t op, globus_gfs_sessio
   
   const char* confSize = "GRIDFTP_CEPH_MODE_E_WRITE_SIZE";
   
-  globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s: GRIDFTP_CEPH_MODE_E_WRITE_SIZE = %s\n",
-      func, confSize); 
+
   
   int rebuff_size = getconfigint(confSize);
+  globus_gfs_log_message(GLOBUS_GFS_LOG_INFO, "%s: GRIDFTP_CEPH_MODE_E_WRITE_SIZE = %d\n",
+      func, rebuff_size);   
+  
   const int lowpower = 20, highpower = 30, defaultpower = 29;
   
   if (rebuff_size >= lowpower && rebuff_size <= highpower) {
     rebuff_size = 1 << rebuff_size;
-    globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+    globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
       "%s: buffer size set to %d bytes\n", __FUNCTION__, rebuff_size);    
     
   } else {
     rebuff_size = 1 << defaultpower;
-    globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+    globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
       "%s: Invalid setting for %s, Range is %d to %d. Defaulting to 2^%d bytes (%d)\n",
       func, confSize, lowpower, highpower, defaultpower, rebuff_size);
   } 
@@ -454,7 +456,7 @@ static void globus_l_gfs_ceph_stat(globus_gfs_operation_t op,
                          func, stat_info->pathname);
   
   
-    globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+    globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
           "%s: prog= %s, audhdb= %s, VO_Role= %s, op= %s, pathname= %s\n",
       func, authdbProg, authdbFilename, VO_Role, "rd", pathname_to_test);  
   
@@ -465,7 +467,7 @@ static void globus_l_gfs_ceph_stat(globus_gfs_operation_t op,
     globus_gridftp_server_finished_stat(op, result, NULL, 0);
     return;
   } else {
-    globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+    globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
           "%s: Authorization.success: 'MLST' operation allowed\n", func);
   }  
   
@@ -567,9 +569,9 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
       /* Support DELE for GridPP FTS when the target already exists*/
     case GLOBUS_GFS_CMD_DELE:
       
-      globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+      globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
         "%s: DELE %s\n", __FUNCTION__, cmd_info->pathname); 
-      globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+      globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
       "%s: checkAccess (VORole = %s, op = %s, pathname = %s\n", 
         __FUNCTION__, VO_Role, "wr", pathname_to_test);
       
@@ -588,7 +590,7 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
         globus_gridftp_server_finished_command(op, result, GLOBUS_NULL); 
       } else {
 
-        globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+        globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
           "%s: Authorization success: DELE operation allowed\n", __FUNCTION__);
 
         int status = ceph_posix_delete(cmd_info->pathname);
@@ -625,9 +627,9 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
          * Check if FTS responds sensibly when it tries to make a parent directory? Or should it have
          * already been denied 'wr' access?
          */
-      globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+      globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
         "%s: MKD %s\n", __FUNCTION__, cmd_info->pathname); 
-      globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+      globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
       "%s: checkAccess (VORole = %s, op = %s, pathname = %s\n", 
         __FUNCTION__, VO_Role, "wr", pathname_to_test);
       
@@ -642,7 +644,7 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
         
       } else {
 
-        globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+        globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
           "%s: acc.success: MKD operation allowed\n", __FUNCTION__);
 
         
@@ -665,9 +667,9 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
 
     case GLOBUS_GFS_CMD_CKSM:
 
-      globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+      globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
         "%s: CKSM %s\n", __FUNCTION__, cmd_info->pathname);
-      globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+      globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
         "%s: checkAccess (VORole = %s, op = %s, pathname = %s\n", 
         __FUNCTION__, VO_Role, "rd", pathname_to_test);
       
@@ -681,7 +683,7 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
         
       } else {
 
-          globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+          globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
           "authz .success: CKSM operation allowed\n");
 
 
@@ -764,8 +766,6 @@ unsigned long get_file_checksum(
   globus_off_t chkOffset,
   unsigned long file_checksum) {
 
-  
-  
 //  unsigned long file_checksum;
   unsigned long i;
   for (i = 1; i < ceph_handle->number_of_blocks; i++) {
@@ -779,7 +779,7 @@ unsigned long get_file_checksum(
         chkOffset = checksum_array[i]->offset;
       } else {
 
-        return 0;
+        return 0; // Should have a break here instead - single return
 
       }
     }
@@ -830,7 +830,7 @@ int build_buffer(
 
   if (offset < ceph_handle->active_start) {
     
-    globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: Offset %lld < active_start of %lld \n", 
+    globus_gfs_log_message(GLOBUS_GFS_LOG_ALL, "%s: Offset %lld < active_start of %lld \n", 
       __FUNCTION__, offset, ceph_handle->active_start );
 
     return BUFFER_OUT_OF_RANGE;
@@ -910,10 +910,10 @@ void flip_buffer(globus_l_gfs_ceph_handle_t * ceph_handle) {
   ceph_handle->active_buff = ceph_handle->overflow_buff; // So we can start with the too-early blocks we've received
   ceph_handle->overflow_buff = temp_buff;
   
-   globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: ACTIVE BUFFER: active_start = %lld, active_end =  %lld \n",
+   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s: ACTIVE BUFFER: active_start = %lld, active_end =  %lld \n",
   __FUNCTION__, ceph_handle->active_start, ceph_handle->active_end); 
    
-   globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: OVERFLOW BUFFER: overflow_start = %lld, overflow_end =  %lld \n",
+   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s: OVERFLOW BUFFER: overflow_start = %lld, overflow_end =  %lld \n",
   __FUNCTION__, ceph_handle->overflow_start, ceph_handle->overflow_end); 
 
    assert(ceph_handle->active_end == ceph_handle->overflow_start-1);
@@ -1349,7 +1349,7 @@ static void globus_l_gfs_ceph_recv(globus_gfs_operation_t op,
    
   if (!allowed) {
     char *error = strerror(errno);
-    globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+    globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
           "%s: Authorization failure: STOR operation fails: %s\n", func, error);  
     (void)snprintf(errorstr, ERRORMSGSIZE, 
             "Authorization error: operation %s not allowed for role %s on path %s", 
@@ -1359,7 +1359,7 @@ static void globus_l_gfs_ceph_recv(globus_gfs_operation_t op,
     globus_gridftp_server_finished_transfer(op, result);
     return;
   } else {
-    globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+    globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
           "%s: acc.success: 'STOR' operation  allowed\n", func);
   }
 
@@ -1374,8 +1374,8 @@ static void globus_l_gfs_ceph_recv(globus_gfs_operation_t op,
   globus_size_t block_size;
   globus_gridftp_server_get_block_size(op, &block_size);
 
-  globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
-          "%s: block_size from globus_gridftp_server_get_block_size: %d \n", func, block_size);
+//  globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+//          "%s: block_size from globus_gridftp_server_get_block_size: %d \n", func, block_size);
   
   struct stat64 sbuf;  
   int rc = ceph_posix_stat64(pathname, &sbuf); // if we use pathname_to_test here, we will needlessly remove first char
@@ -1511,7 +1511,7 @@ static void globus_l_gfs_ceph_send(globus_gfs_operation_t op,
 
   if (!allowed) {
     char *error = strerror(errno);
-    globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+    globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
       "%s: Authorization failure: 'GET' operation  fails: %s\n", func, error);
 
     (void) snprintf(errorstr, ERRORMSGSIZE,
@@ -1521,8 +1521,8 @@ static void globus_l_gfs_ceph_send(globus_gfs_operation_t op,
     globus_gridftp_server_finished_transfer(op, result);
     return;
   } else {
-    globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
-      "%s: acc.success: 'rd' operation  allowed\n", func);
+    globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
+      "%s: acc.success: 'GET' operation  allowed\n", func);
   }
 
   /* Check whether the file exists before going any further */
