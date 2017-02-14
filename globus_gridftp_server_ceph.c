@@ -830,7 +830,7 @@ int build_buffer(
 
   if (offset < ceph_handle->active_start) {
     
-    globus_gfs_log_message(GLOBUS_GFS_LOG_ALL, "%s: Offset %lld < active_start of %lld \n", 
+    globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: Offset %lld < active_start of %lld \n", 
       __FUNCTION__, offset, ceph_handle->active_start );
 
     return BUFFER_OUT_OF_RANGE;
@@ -852,7 +852,7 @@ int build_buffer(
     ++ceph_handle->nblocks_in_range;
 
     if (dest_buff->nbytes == ceph_handle->rebuff_size || eof) {
-      globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: Returning BUFFER_WRITE\n", __FUNCTION__);  
+      globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s: Returning BUFFER_WRITE\n", __FUNCTION__);  
       return BUFFER_WRITE;
     } else {
       return BUFFER_CONTINUE;
@@ -1132,7 +1132,7 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
       globus_l_gfs_ceph_read_from_net(ceph_handle);
     }  else if(ceph_handle->outstanding == 0) { /* if done and there are no outstanding callbacks finish */
       
-          globus_gfs_log_message(GLOBUS_GFS_LOG_INFO, "%s: AFTER check outstanding == 0 \n", __FUNCTION__); 
+          globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s: AFTER check outstanding == 0 \n", __FUNCTION__); 
 
       if (ceph_handle->number_of_blocks > 0) {
 
@@ -1262,6 +1262,7 @@ static void globus_l_gfs_ceph_read_from_net
       globus_gfs_log_message(GLOBUS_GFS_LOG_ERR,
                              "%s: register read has finished with a bad result\n",
                              func);
+      globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s:%d, on register read FAIL, GLOBUS_FREE %p\n", __FUNCTION__, __LINE__, buffer);     
       globus_free(buffer);
       ceph_handle->cached_res = result;
       if (ceph_handle->outstanding == 0) {
@@ -1660,6 +1661,7 @@ static globus_bool_t globus_l_gfs_ceph_send_next_to_client
     }
     return ceph_handle->done;
   }
+  globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s:%d GLOBUS_MALLOC %p\n", __FUNCTION__, __LINE__, buffer);
 
   nbread = ceph_posix_read(ceph_handle->fd, buffer, read_length);
   if (nbread>0) {
@@ -1671,6 +1673,7 @@ static globus_bool_t globus_l_gfs_ceph_send_next_to_client
       (checksum_block_list_t *)globus_malloc(sizeof(checksum_block_list_t));
 
     if (ceph_handle->checksum_list_p->next==NULL) {
+      globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s:%d checksum malloc fails, GLOBUS_FREE %p\n", __FUNCTION__, __LINE__, buffer);
       globus_free(buffer);
       globus_ceph_close(func, ceph_handle, "internal error (malloc failed)");
       if (ceph_handle->outstanding == 0) {
@@ -1688,6 +1691,7 @@ static globus_bool_t globus_l_gfs_ceph_send_next_to_client
   }
   if(nbread == 0) { /* eof */
     result = GLOBUS_SUCCESS;
+    globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s:%d on EOF, GLOBUS_FREE %p\n", __FUNCTION__, __LINE__, buffer); 
     globus_free(buffer);
 
     /* checksum calculation */
@@ -1794,6 +1798,7 @@ static globus_bool_t globus_l_gfs_ceph_send_next_to_client
     return ceph_handle->done;
   }
   if (nbread < 0) { /* error */
+    globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s:%d on nbread < 0, GLOBUS_FREE %p\n", __FUNCTION__, __LINE__, buffer);      
     globus_free(buffer);
     globus_ceph_close(func, ceph_handle, "error reading from disk");
     if (ceph_handle->outstanding == 0) {
@@ -1825,6 +1830,7 @@ static globus_bool_t globus_l_gfs_ceph_send_next_to_client
   ceph_handle->blk_offset += read_length;
 
   if(res != GLOBUS_SUCCESS) {
+    globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s:%d, GLOBUS_FREE %p\n", __FUNCTION__, __LINE__, buffer);     
     globus_free(buffer);
     globus_ceph_close(func, ceph_handle, "error writing to network");
     ceph_handle->cached_res = res;
@@ -1850,6 +1856,7 @@ static void globus_l_gfs_net_write_cb(globus_gfs_operation_t op,
   (void)nbytes;
   ceph_handle = (globus_l_gfs_ceph_handle_t *) user_arg;
 
+  globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s:%d GLOBUS_FREE %p\n", __FUNCTION__, __LINE__, buffer);
   globus_free(buffer);
   globus_mutex_lock(&ceph_handle->mutex);
   {
