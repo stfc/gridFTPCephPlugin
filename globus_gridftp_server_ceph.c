@@ -466,8 +466,8 @@ static void globus_l_gfs_ceph_stat(globus_gfs_operation_t op,
                          func, stat_info->pathname);
   
   
-    globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
-          "%s: prog= %s, audhdb= %s, VO_Role= %s, op= %s, pathname= %s\n",
+    globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+          "%s: prog= %s, authdb= %s, VO_Role= %s, op= %s, pathname= %s\n",
       func, authdbProg, authdbFilename, VO_Role, "rd", pathname_to_test);  
   
   int allowed = checkAccess(authdbProg, authdbFilename, VO_Role, "rd", pathname_to_test);
@@ -610,9 +610,9 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
           //errno = -status; // Return error code to client
           snprintf(errormessage, ERRORMSGSIZE, "%s", strerror(-status));
           result = GlobusGFSErrorGeneric(errormessage);
+             
+          globus_gridftp_server_finished_command(op, result, errormessage /* GLOBUS_NULL */);
           
-          
-          globus_gridftp_server_finished_command(op, result, GLOBUS_NULL);
         } else {
           errno = 0;
           globus_gridftp_server_finished_command(op, GLOBUS_SUCCESS, GLOBUS_NULL);
@@ -858,8 +858,11 @@ int build_buffer(
 
     if (dest_buff->nbytes == ceph_handle->rebuff_size || eof) {
         
-      globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s: Returning BUFFER_WRITE (%lld, %lld)\n", 
-              __FUNCTION__, ceph_handle->active_start, ceph_handle->active_end);  
+      globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, 
+              "%s: Returning BUFFER_WRITE (%lld, %lld), n_inrange = %d, n_overflow = %d\n", 
+              __FUNCTION__, 
+              ceph_handle->active_start, ceph_handle->active_end, 
+              ceph_handle->nblocks_in_range, ceph_handle->nblocks_in_overflow);  
       return BUFFER_WRITE;
       
     } else {
@@ -871,6 +874,8 @@ int build_buffer(
   } else if (offset >= ceph_handle->overflow_start) {
 
     if (offset + nbytes - 1 <= ceph_handle->overflow_end) { // in OVERFLOW range
+        
+        globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "Overflow offset %lld\n", offset);
 
       dest_buff = ceph_handle->overflow_buff;
       
@@ -925,6 +930,8 @@ void flip_buffer(globus_l_gfs_ceph_handle_t * ceph_handle) {
 //  __FUNCTION__, ceph_handle->overflow_start, ceph_handle->overflow_end); 
 
    assert(ceph_handle->active_end == ceph_handle->overflow_start-1);
+   ceph_handle->nblocks_in_range = ceph_handle->nblocks_in_overflow;
+   ceph_handle->nblocks_in_overflow = 0;
    
 }
 
@@ -1577,7 +1584,7 @@ static void globus_l_gfs_ceph_send(globus_gfs_operation_t op,
     (void) snprintf(errorstr, ERRORMSGSIZE,
       "Authorization error: operation %s not allowed for role %s on path %s",
       operation, VO_Role, transfer_info->pathname);
-    result = GlobusGFSErrorGeneric("acc.error: 'rd' operation not allowed");
+    result = GlobusGFSErrorGeneric(errorstr);
     globus_gridftp_server_finished_transfer(op, result);
     return;
   } else {
