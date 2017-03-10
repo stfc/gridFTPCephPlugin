@@ -440,33 +440,40 @@ extern "C" {
       }
       radosUserId.assign(radosUser);
     }
-    
-int ceph_posix_delete(const char *pathname) {
-    errno = 0;
-    if (!strcmp(getdebug(), "1")) {
-      logwrapper((char*) "%s : %s\n", __FUNCTION__, pathname);
-    }
-    CephFileRef fr = getCephFileRef(pathname, 0, (mode_t) 0, 0); // flags, mode, 0);
-    libradosstriper::RadosStriper *striper = getRadosStriper(fr);
-    if (NULL == striper) {
-      logwrapper((char*) "%s : Can't get striper\n", __FUNCTION__);
-      errno = ENOENT;
-      return -ENOENT;
-    }
-    if (!strcmp(getdebug(), "9")) {
-      logwrapper((char*) "%s : fr.name = %s\n", __FUNCTION__, fr.objectname.c_str());
-    }
-    int rc = striper->remove(fr.objectname);
-    if (rc != 0) {
-      logwrapper((char*) "%s : Can't delete %s, rc = %d\n", __FUNCTION__, fr.objectname.c_str(), rc);
-      //errno = ENOENT;
-      return rc;
-    } else {
-      logwrapper((char*) "%s : delete OK for %s\n", __FUNCTION__, fr.objectname.c_str(), rc);
 
+    int ceph_posix_delete(const char *pathname) {
+        errno = 0;
+        if (!strcmp(getdebug(), "1")) {
+            logwrapper((char*) "%s : %s\n", __FUNCTION__, pathname);
+        }
+        CephFileRef fr = getCephFileRef(pathname, 0, (mode_t) 0, 0); // flags, mode, 0);
+        if (!strcmp(getdebug(), "1")) {
+            logwrapper((char*) "%s : About to call getRadosStriper\n", __FUNCTION__, pathname);
+        }
+        libradosstriper::RadosStriper *striper = getRadosStriper(fr);
+        if (NULL == striper) {
+            logwrapper((char*) "%s : Can't get striper\n", __FUNCTION__);
+            errno = ENOENT;
+            return -ENOENT;
+        }
+        if (!strcmp(getdebug(), "9")) {
+            logwrapper((char*) "%s : fr.name = %s\n", __FUNCTION__, fr.objectname.c_str());
+        }
+
+        alarm(60); // Increased from 10s because deletion can take around 20s, let's be a bit generous
+        int rc = striper->remove(fr.objectname);
+        alarm(0);
+
+        if (rc != 0) {
+            logwrapper((char*) "%s : Can't delete %s, rc = %d\n", __FUNCTION__, fr.objectname.c_str(), rc);
+            //errno = ENOENT;
+            return rc;
+        } else {
+            logwrapper((char*) "%s : delete OK for %s\n", __FUNCTION__, fr.objectname.c_str(), rc);
+
+        }
+        return rc;
     }
-    return rc;
-  }
         
 
 
@@ -546,7 +553,10 @@ int ceph_posix_delete(const char *pathname) {
       }
       ceph::bufferlist bl;
       bl.append((const char*)buf, count);      
+      
+      alarm(30);
       int rc = striper->write(fr.objectname, bl, count, fr.offset);
+      alarm(0);
       
 #ifdef TRACE_WRITES    
 
@@ -597,7 +607,7 @@ int ceph_posix_delete(const char *pathname) {
     }
   }
 
-  
+
   
   int ceph_posix_stat64(const char *pathname, struct stat64 *buf) {
       
@@ -608,21 +618,21 @@ int ceph_posix_delete(const char *pathname) {
 //    char *inpath = strdup(pathname);
     CephFile cephFile = getCephFile(pathname);
         
-    (void)cephFile.objectname.c_str();
-    
+
     libradosstriper::RadosStriper *striper = getRadosStriper(cephFile);    
     if (0 == striper) {    
       errno = ENOENT;
       return -errno;
     }
     memset(buf, 0, sizeof(*buf));
-            
-//    int rc = searching_stat64(striper, &wanted, buf);
+                
+    logwrapper((char*)"%s : about to striper->stat %s\n", __FUNCTION__, cephFile.objectname.c_str());
     
-
+    alarm(10);   
     int rc = striper->stat(cephFile.objectname.c_str(), 
             (uint64_t*)&(buf->st_size), &(buf->st_atime));
-        
+    alarm(0);
+           
     if (rc != 0) {
       
       logwrapper((char*)"%s : striper->stat returned %d for '%s'%s\n", __FUNCTION__, 
