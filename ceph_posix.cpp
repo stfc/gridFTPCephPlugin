@@ -28,9 +28,21 @@
 #include <limits.h>
 #include <sys/param.h>
 
+#include "external_delete.h"
+
 #define LOWLEVELTRACE
-//std::string saved_ceph_userId; // should this be static?
-//std::string saved_ceph_pool;
+
+
+/// global variable for the log function
+static void (*g_logfunc) (char *, va_list argp) = 0;
+
+static void logwrapper(char* format, ...) {
+  if (0 == g_logfunc) return;
+  va_list arg;
+  va_start(arg, format);
+  (*g_logfunc)(format, arg);
+  va_end(arg);
+}
 
 const char *getdebug() {
     char *debug = getenv("DEBUG");
@@ -76,16 +88,7 @@ CephFile g_defaultParams = { "",                // object name
 
 std::string radosUserId;
 
-/// global variable for the log function
-static void (*g_logfunc) (char *, va_list argp) = 0;
 
-static void logwrapper(char* format, ...) {
-  if (0 == g_logfunc) return;
-  va_list arg;
-  va_start(arg, format);
-  (*g_logfunc)(format, arg);
-  va_end(arg);
-}
 
 /// simple integer parsing, to be replaced by std::stoll when C++11 can be used
 static unsigned long long int stoull(const std::string &s) {
@@ -465,8 +468,17 @@ extern "C" {
         alarm(0);
 
         if (rc != 0) {
-            logwrapper((char*) "%s : Can't delete %s, rc = %d\n", __FUNCTION__, fr.objectname.c_str(), rc);
-            //errno = ENOENT;
+            logwrapper((char*) "%s : Can't striper->remove %s, rc = %d\n", __FUNCTION__, fr.objectname.c_str(), rc);
+            if (rc == -EBUSY) {
+                                
+                std::string pathname = fr.pool + ":" + fr.objectname;
+                logwrapper((char*) "%s: About to external_delete %s.\n", __FUNCTION__, pathname.c_str());
+                int rc2;                 
+                rc2 = external_delete("/usr/bin/forcedelete.py", "/etc/ceph/ceph.conf", pathname.c_str());
+                logwrapper((char*) "%s: Return from external_delete = %d.\n", __FUNCTION__, rc2);
+                
+                rc = rc2;
+            }
             return rc;
         } else {
             logwrapper((char*) "%s : delete OK for %s\n", __FUNCTION__, fr.objectname.c_str(), rc);
@@ -491,7 +503,7 @@ extern "C" {
     }
     return g_nextCephFd-1;
   }
-
+  
   int ceph_posix_close(int fd) {
     std::map<unsigned int, CephFileRef>::iterator it = g_fds.find(fd);
     if (it != g_fds.end()) {
