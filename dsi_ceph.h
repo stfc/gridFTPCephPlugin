@@ -43,6 +43,7 @@ typedef struct globus_l_gfs_ceph_handle_s {
   
   globus_off_t active_start, active_end, overflow_start, overflow_end;
       
+  globus_off_t alloc_size;
 } globus_l_gfs_ceph_handle_t;
 
 /* a function to wrap all is needed to close a file */
