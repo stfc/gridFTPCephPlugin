@@ -44,7 +44,7 @@ include_directories(${GLOBUS_CONFINC_PATH} ${GLOBUS_INC_PATH} )
 set_property (SOURCE globus_gridftp_server_ceph.c
   PROPERTY COMPILE_FLAGS "${GLOBUS_MOPTION}")
 add_library (globus_gridftp_server_ceph SHARED
-  globus_gridftp_server_ceph.c ceph_posix.cpp gridftp_checkaccess.c)
+  globus_gridftp_server_ceph.c ceph_posix.cpp gridftp_checkaccess.c external_delete.c)
 target_link_libraries(globus_gridftp_server_ceph ${RADOS_LIBS})
 set_target_properties (globus_gridftp_server_ceph PROPERTIES
   LINK_FLAGS "${GLOBUS_FTPLIB} -lz")
