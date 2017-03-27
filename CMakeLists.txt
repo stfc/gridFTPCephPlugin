@@ -27,7 +27,7 @@ find_package (globus REQUIRED)
 find_package (ceph REQUIRED)
 find_package (xrootd REQUIRED)
 
-include_directories(${PROJECT_SOURCE_DIR} ${RADOS_INCLUDE_DIR} )
+include_directories(${PROJECT_SOURCE_DIR} ${RADOS_INCLUDE_DIR} ${XROOTD_INCLUDE_DIR} )
 
 execute_process (COMMAND uname -m OUTPUT_VARIABLE GLOBUS_UNAME)
 string (REGEX REPLACE "\n" "" GLOBUS_UNAME ${GLOBUS_UNAME})
