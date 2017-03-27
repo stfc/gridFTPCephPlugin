@@ -703,7 +703,7 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
         //      /** length of data to read for cksm command   -1 means full file */
         //      cksm_length = cmd_info->cksm_length;
         char *checksum = ceph_posix_get_checksum(cmd_info->pathname);  // TO-DO: Should check for error status
-
+        
         globus_result_t result;
         if (checksum == NULL) { // [0] == '-') {
           errno = ENOENT;
@@ -1204,15 +1204,25 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
         globus_free(checksum_array);
         free_checksum_list(ceph_handle->checksum_list);
         /* set extended attributes */
+        
+        int rc = ceph_posix_set_checksum(ceph_handle->fd, "adler32", ckSumbuf);
+        
+        if (rc != 0) {
+          globus_gfs_log_message(GLOBUS_GFS_LOG_ERR,"%s: unable to store checksum XrdCks as xattr\n", func);
+        
+        }
+        
+        
         if (ceph_posix_fsetxattr(ceph_handle->fd,"user.checksum.type",
-                                 ckSumalg, strlen(ckSumalg), 0)) {
+                                 ckSumalg, strlen(ckSumalg), 0) != 0) {
           globus_gfs_log_message(GLOBUS_GFS_LOG_ERR,"%s: unable to store checksum type as xattr\n", func);
         }
         else if (ceph_posix_fsetxattr(ceph_handle->fd,"user.checksum.value",
-                                      ckSumbuf, strlen(ckSumbuf), 0)) {
+                                      ckSumbuf, strlen(ckSumbuf), 0) != 0) {
           globus_gfs_log_message(GLOBUS_GFS_LOG_ERR,"%s: unable to store checksum value as xattr\n", func);
         }
       } // ceph_handle->number_of_blocks > 0
+      
       globus_ceph_close(func, ceph_handle, NULL);
       globus_gridftp_server_finished_transfer(op, ceph_handle->cached_res);
       
