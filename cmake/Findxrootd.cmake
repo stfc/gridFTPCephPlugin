@@ -10,10 +10,10 @@ if (XROOTD_INCLUDE_DIR)
 endif (XROOTD_INCLUDE_DIR)
 
 find_path (XROOTD_INCLUDE_DIR NAME xrootd) 
+set (XROOTD_INCLUDE_DIR "/usr/include/xroot")
 
-find_library (XROOTDSERVER_LIB XrdServer)
 find_library (XROOTDUTILS_LIB XrdUtils)
-set (XROOTD_LIBS ${XROOTDSERVER_LIB} ${XROOTDUTILS_LIB})
+set (XROOTD_LIBS  ${XROOTDUTILS_LIB})
 
 message (STATUS "XROOTD_INCLUDE_DIR        = ${XROOTD_INCLUDE_DIR}")
 message (STATUS "XROOTD_LIBS               = ${XROOTD_LIBS}")
