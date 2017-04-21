@@ -1,5 +1,5 @@
 Name:           globus-gridftp-server-ceph
-Version:        0.9
+Version:        1.1
 Release:        1%{?dist}
 Summary:        Globus GridFTP Server - Ceph Plugin
 
@@ -8,14 +8,14 @@ License:        STFC
 URL:            https://github.com/stfc/gridFTPCephPlugin
 Source0:        gridFTPCephPlugin.tar.gz
 
-#Vendor:         
-#Packager:       
-
 Requires:       globus-gridftp-server-progs
 # We need /usr/bin/xrdacctest from xrootd-server for parsing /etc/grid-security/authdb
 Requires:       xrootd-server
+Requires:       xrootd-libs
 Requires:       libradosstriper1
+
 BuildRequires:  globus-gridftp-server-devel
+BuildRequires:  xrootd-devel
 BuildRequires:  librados-devel
 BuildRequires:  libradosstriper-devel
 BuildRequires:  cmake
@@ -60,5 +60,8 @@ install libglobus_gridftp_server_ceph.so $RPM_BUILD_ROOT%{_libdir}
 
 
 %changelog
+* Mon Feb 06 2017 Bob Builder <bob@buildfarm.com> 1.1
+- Add more xrootd requirements.
+
 * Mon Feb 06 2017 Bob Builder <bob@buildfarm.com> 0.9
 - First draft of GridFTP plugin spec file.
