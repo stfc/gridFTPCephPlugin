@@ -25,6 +25,11 @@ extern "C" {
   int ceph_posix_stat64(const char *pathname, struct stat64 *buf);
   ssize_t ceph_posix_fgetxattr(int fd, const char* name, void* value, size_t size);
   int ceph_posix_fsetxattr(int fd, const char* name, const void* value, size_t size, int flags);
+  char *ceph_posix_get_new_format_checksum_fd(const int fd);
+  char *ceph_posix_get_new_format_checksum(const char* pathname);
+  
+  char *ceph_posix_get_old_format_checksum_fd(const int fd);
+  char *ceph_posix_get_old_format_checksum(const char* pathname);
 
 #ifdef __cplusplus
 }

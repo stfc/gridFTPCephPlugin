@@ -57,7 +57,7 @@ static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t,
 static void globus_l_gfs_ceph_read_from_net(globus_l_gfs_ceph_handle_t * );
 static globus_result_t globus_l_gfs_make_error(const char *);
 
-int ceph_handle_open(char *, int, int, globus_l_gfs_ceph_handle_t *);
+const  int ceph_handle_open(const char *, const int flags, const int mode, globus_l_gfs_ceph_handle_t *);
 static globus_bool_t globus_l_gfs_ceph_send_next_to_client(globus_l_gfs_ceph_handle_t *);
 static void globus_l_gfs_net_write_cb(globus_gfs_operation_t,
                                       globus_result_t,

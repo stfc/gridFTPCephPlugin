@@ -132,7 +132,7 @@ void fillCephFileParams(const std::string &params, CephFile &file) {
   // parse the params one by one
     
   
-  logwrapper((char*)"%s: params = %s.\n", __FUNCTION__, params.c_str());
+//  logwrapper((char*)"%s: params = %s.\n", __FUNCTION__, params.c_str());
   
   file.pool = params;
   
@@ -198,6 +198,7 @@ void fillCephFile(const char *path, CephFile &file) {
       logwrapper((char*) "%s : about to call fillCephFileParams with empty string\n", __FUNCTION__);
     }   
     fillCephFileParams("", file);
+    
   } else {
       
     if (!strcmp("9", getdebug())) {
@@ -702,72 +703,111 @@ extern "C" {
     bl.copy(0, rc, (char*)value);
     return rc;
     }
+
+  int ceph_posix_set_old_format_checksum(const int fd, const char* ckSumbuf) {
+
+    int rc = -1;
+    const char* ckSumalg = "adler32";
+
+    if (ceph_posix_fsetxattr(fd, "user.checksum.type", ckSumalg, strlen(ckSumalg), 0) == 0 &&
+      ceph_posix_fsetxattr(fd, "user.checksum.value", ckSumbuf, strlen(ckSumbuf), 0) == 0) {
+
+      rc = 0;
+    }
+    return rc;
+  }
   
-  int ceph_posix_set_checksum(const int fd, const char* cstype, const char* ckSumbuf) {
+  int ceph_posix_set_new_format_checksum_fd(const int fd, const char* cstype, const char* ckSumbuf) {
       
       int rc = -1;
       
       std::vector<char> attrData = XrdCksAttrData(cstype, ckSumbuf, time(0));
   
-      rc = ceph_posix_fsetxattr(fd,
-        /* "XrdCks.adler32", */ XrdCksAttrName(cstype).c_str(), 
+      rc = ceph_posix_fsetxattr(fd, XrdCksAttrName(cstype).c_str(), 
         attrData.data(), attrData.size(), 0); 
   
       return rc;
   }
 
-    char *ceph_posix_get_checksum(const char* pathname) {
+  char* ceph_posix_get_new_format_checksum(const char* pathname) {
 
-        char *checksum = NULL;
-        int fd = ceph_posix_open(pathname, O_RDONLY, 0);
+    char *checksum = NULL;
+    const int fd = ceph_posix_open(pathname, O_RDONLY, 0);
 
-        if (fd < 0) {
-            
-         logwrapper((char*)"%s: can't open\n", __FUNCTION__);
-           
-            return checksum;
-        }
+    if (fd >= 0) {
 
-        char ckSumbufdisk[CA_MAXCKSUMLEN + 1];
-        int xattr_len;
-        
-        /* 
-         * Try to get the XRootD format checksum first...
-         */
-        
-        std::string attrName = XrdCksAttrName("adler32");
-    
-        logwrapper((char*)"%s: Trying to find XrdCks attribute %s\n", __FUNCTION__, attrName.c_str());
-                
-        xattr_len = ceph_posix_fgetxattr(fd, attrName.c_str(), ckSumbufdisk, CA_MAXCKSUMLEN);
-
-        if (xattr_len > 0) {
-                        
-            std::string csVal = XrdCksAttrValue("adler32", ckSumbufdisk, xattr_len);
-            checksum = strdup(csVal.c_str());       
-            logwrapper((char*)"%s: found XrdCks attribute, value =  %s\n", __FUNCTION__, checksum);
-
-        } else {
-            
-            /*
-             * Try to get the old, GridFTP format checksum 
-             */
-            logwrapper((char*)"%s: looking for GridFTP attribute user.checksum.value\n", __FUNCTION__);
-
-            xattr_len = ceph_posix_fgetxattr(fd, "user.checksum.value", ckSumbufdisk, CA_MAXCKSUMLEN);
-
-            if (xattr_len > 0) {
-                ckSumbufdisk[xattr_len] = '\0';
-                checksum = strdup(ckSumbufdisk);
-            }
-
-        }
-        ceph_posix_close(fd);
-         
-        return checksum;
+      checksum = ceph_posix_get_new_format_checksum_fd(fd);
+      ceph_posix_close(fd);
 
     }
+
+    return checksum;
+
+  }
   
+/*
+ * TO-DO: Pass desired checksum name as a parameter
+ */
+  
+  char *ceph_posix_get_new_format_checksum_fd(const int fd) {
+
+    char *checksum = NULL;
+
+    char ckSumbufdisk[CA_MAXCKSUMLEN + 1];
+    int xattr_len;
+
+    std::string attrName = XrdCksAttrName("adler32");
+
+    xattr_len = ceph_posix_fgetxattr(fd, attrName.c_str(), ckSumbufdisk, CA_MAXCKSUMLEN);
+
+    if (xattr_len > 0) {
+
+      std::string csVal = XrdCksAttrValue("adler32", ckSumbufdisk, xattr_len);
+      checksum = strdup(csVal.c_str());
+
+    } 
+
+    return checksum;
+  }
+    
+    
+   char* ceph_posix_get_old_format_checksum(const char* pathname) {
+      
+        char *checksum = NULL;
+        const int fd = ceph_posix_open(pathname, O_RDONLY, 0);
+
+        if (fd >= 0) {
+
+          checksum = ceph_posix_get_old_format_checksum_fd(fd);
+          ceph_posix_close(fd);
+        
+        }
+         
+        return checksum;         
+  } 
+   
+   
+  char *ceph_posix_get_old_format_checksum_fd(const int fd) {
+
+    char *checksum = NULL;
+    char ckSumbufdisk[CA_MAXCKSUMLEN + 1];
+    int xattr_len;
+
+    /*
+     * Try to get the old, GridFTP format checksum 
+     */
+
+    xattr_len = ceph_posix_fgetxattr(fd, "user.checksum.value", ckSumbufdisk, CA_MAXCKSUMLEN);
+
+    if (xattr_len > 0) {
+      ckSumbufdisk[xattr_len] = '\0'; // Make sure to zap string after desired content
+      checksum = strdup(ckSumbufdisk);
+    }
+
+    return checksum;
+
+  } 
+    
   ssize_t ceph_posix_fgetxattr(int fd, const char* name,
                                void* value, size_t size) {
     std::map<unsigned int, CephFileRef>::iterator it = g_fds.find(fd);
@@ -803,7 +843,6 @@ extern "C" {
     std::map<unsigned int, CephFileRef>::iterator it = g_fds.find(fd);
     if (it != g_fds.end()) {
       CephFileRef &fr = it->second;
-      logwrapper((char*)"ceph_fsetxattr: fd %d name=%s value=%s\n", fd, name, value);
       return ceph_posix_internal_setxattr(fr, name, value, size, flags);
     } else {
       return -EBADF;
