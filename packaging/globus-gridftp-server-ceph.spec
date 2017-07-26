@@ -1,5 +1,5 @@
 Name:           globus-gridftp-server-ceph
-Version:        1.1
+Version:        1.2
 Release:        1%{?dist}
 Summary:        Globus GridFTP Server - Ceph Plugin
 
