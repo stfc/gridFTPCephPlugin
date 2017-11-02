@@ -596,6 +596,9 @@ extern "C" {
   }
 
   ssize_t ceph_posix_read(int fd, void *buf, size_t count) {
+    
+    static ceph::bufferlist bl;
+    
     std::map<unsigned int, CephFileRef>::iterator it = g_fds.find(fd);
     static int reported_size = 0;
     
@@ -613,10 +616,11 @@ extern "C" {
       if (0 == striper) {
         return -EINVAL;
       }
-      ceph::bufferlist bl;
+      //ceph::bufferlist bl;
       int rc = striper->read(fr.objectname, &bl, count, fr.offset);
       if (rc < 0) return rc;
       bl.copy(0, rc, (char*)buf);
+      bl.clear();
       fr.offset += rc;
       return rc;
     } else {
