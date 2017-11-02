@@ -896,6 +896,7 @@ int build_buffer(
       dest_buff->nbytes += nbytes;
 
       ++ceph_handle->nblocks_in_overflow;
+      globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: There are %lu blocks in overflow buffer.\n", __FUNCTION__, ceph_handle->nblocks_in_overflow);
 
       if (dest_buff->nbytes == ceph_handle->rebuff_size) {
         globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%s: OVERFLOW BUFFER FULL!! SHOULD NOT HAPPEN! -- Returning BUFFER_WRITE\n", __FUNCTION__);
@@ -962,7 +963,7 @@ globus_off_t get_offset(globus_l_gfs_ceph_handle_t * ceph_handle) {
 
 
 /* receive from client */
-static void globus_l_gfs_file_net_read_cb(globus_gfs_operation_t op,
+static void globus_l_gfs_ceph_net_read_cb(globus_gfs_operation_t op,
                                           globus_result_t result,
                                           globus_byte_t *buffer,
                                           globus_size_t nbytes,
@@ -1326,7 +1327,7 @@ static unsigned long get_checksum_from_file(const char* path, globus_gfs_operati
   
   while (nbread = ceph_posix_read(ceph_handle->fd, buffer, read_length)  != 0) {
     
-    
+    ceph_handle->blk_length += nbread; // Increase the offset
       start_offset = ceph_posix_lseek64(ceph_handle->fd,
                                     ceph_handle->blk_offset,
                                     SEEK_SET);
@@ -1391,15 +1392,12 @@ static void globus_l_gfs_ceph_read_from_net
   }
   
   GlobusGFSName(globus_l_gfs_ceph_read_from_net);
-  /* in the read case this number will vary */
-
-  
-//  ceph_handle->op->data_handle->info.blocksize = 33554432;
-
   
   globus_gridftp_server_get_optimal_concurrency(ceph_handle->op,
                                                 &ceph_handle->optimal_count);
-
+  
+//  globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s: optimal_concurrency: %u\n",
+//    func, ceph_handle->optimal_count);
   while(ceph_handle->outstanding < ceph_handle->optimal_count) {
     buffer=globus_malloc(ceph_handle->block_size);
     if (buffer == NULL) {
@@ -1428,7 +1426,7 @@ static void globus_l_gfs_ceph_read_from_net
     result= globus_gridftp_server_register_read(ceph_handle->op,
                                                 buffer,
                                                 ceph_handle->block_size,
-                                                globus_l_gfs_file_net_read_cb,
+                                                globus_l_gfs_ceph_net_read_cb,
                                                 ceph_handle);
 
     if(result != GLOBUS_SUCCESS)  {
@@ -1507,7 +1505,12 @@ static void globus_l_gfs_ceph_recv(globus_gfs_operation_t op,
   
   GlobusGFSName(globus_l_gfs_ceph_recv);
   ceph_handle = (globus_l_gfs_ceph_handle_t *) user_arg;
-  ceph_handle->alloc_size = transfer_info->alloc_size;
+  
+  if (transfer_info->alloc_size > 0) {
+      globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+          "%s: transfer size = %lu\n", func, transfer_info->alloc_size);
+      ceph_handle->alloc_size = transfer_info->alloc_size;
+  }
   
   const char* pathname_to_test = cleanup_pathname(transfer_info->pathname);
   pathname =  strdup(pathname_to_test);
@@ -1546,8 +1549,8 @@ static void globus_l_gfs_ceph_recv(globus_gfs_operation_t op,
   }
  
   globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,"%s: pathname now: %s \n", func, _pathname);
-  globus_size_t block_size;
-  globus_gridftp_server_get_block_size(op, &block_size);
+//  globus_size_t block_size;
+//  globus_gridftp_server_get_block_size(op, &block_size);
 
 //  globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
 //          "%s: block_size from globus_gridftp_server_get_block_size: %d \n", func, block_size);
@@ -1951,40 +1954,7 @@ static globus_bool_t globus_l_gfs_ceph_send_next_to_client
     free_checksum_list(ceph_handle->checksum_list);
     
     /* get extended attributes */
-    
 
-//    xattr_len = ceph_posix_fgetxattr(ceph_handle->fd,
-//      "user.checksum.type",
-//      ckSumnamedisk,
-//      CA_MAXCKSUMNAMELEN);
-//    if (xattr_len < 0) {
-//      /* no error messages */
-//      useCksum = 0;
-//    } else {
-//      ckSumnamedisk[xattr_len] = '\0';
-//      xattr_len = ceph_posix_fgetxattr(ceph_handle->fd,
-//        "user.checksum.value",
-//        ckSumbufdisk, CA_MAXCKSUMLEN);
-//      if (xattr_len < 0) {
-//        /* error */
-//        ceph_handle->cached_res =
-//          globus_error_put(globus_object_construct(GLOBUS_ERROR_TYPE_BAD_DATA));
-//        if (ceph_handle->outstanding == 0) {
-//          globus_gridftp_server_finished_transfer(ceph_handle->op,
-//            ceph_handle->cached_res);
-//        }
-//        char errorBuf[ERRORMSGSIZE];
-//        (void) snprintf(errorBuf, ERRORMSGSIZE,
-//          "error detected while reading checksum for fd: %d, errono=%d\n", ceph_handle->fd, -xattr_len);
-//        globus_ceph_close(func, ceph_handle, errorBuf);
-//        return ceph_handle->done;
-//      } else {
-//        ckSumbufdisk[xattr_len] = '\0';
-//        if (strncmp(ckSumnamedisk, "ADLER32", CA_MAXCKSUMNAMELEN) != 0) {
-//          useCksum = 1; /* for gridftp we know only ADLER32 */
-//        }
-//      }
-//    }
 
     int upgradeChecksum = 0;
     char* storedChecksum = NULL;
@@ -2182,15 +2152,21 @@ GlobusExtensionDefineModule(globus_gridftp_server_ceph) = {
  *  no need to change this
  */
 static int globus_l_gfs_ceph_activate(void) {
+//  
+  // initialize ceph wrapper log 
+  ceph_posix_set_logfunc(ceph_logfunc_wrapper);
+
+  if (getenv("GRIDFTP_USE_ORDERED_DATA") != NULL) {
+    
+//    globus_l_gfs_ceph_dsi_iface.descriptor |= GLOBUS_GFS_DSI_DESCRIPTOR_REQUIRES_ORDERED_DATA;
+    globus_gfs_log_message(GLOBUS_GFS_LOG_INFO, "%s: Setting ordered data mode\n", __FUNCTION__);
+  
+  }
   globus_extension_registry_add(GLOBUS_GFS_DSI_REGISTRY,
     "ceph",
     GlobusExtensionMyModule(globus_gridftp_server_ceph),
     &globus_l_gfs_ceph_dsi_iface);
-  // initialize ceph wrapper log
-  ceph_posix_set_logfunc(ceph_logfunc_wrapper);
 
-
-  
   return 0;
 
 
