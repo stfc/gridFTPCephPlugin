@@ -2158,7 +2158,7 @@ static int globus_l_gfs_ceph_activate(void) {
 
   if (getenv("GRIDFTP_USE_ORDERED_DATA") != NULL) {
     
-//    globus_l_gfs_ceph_dsi_iface.descriptor |= GLOBUS_GFS_DSI_DESCRIPTOR_REQUIRES_ORDERED_DATA;
+    globus_l_gfs_ceph_dsi_iface.descriptor |= GLOBUS_GFS_DSI_DESCRIPTOR_REQUIRES_ORDERED_DATA;
     globus_gfs_log_message(GLOBUS_GFS_LOG_INFO, "%s: Setting ordered data mode\n", __FUNCTION__);
   
   }
