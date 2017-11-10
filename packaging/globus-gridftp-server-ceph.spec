@@ -63,6 +63,9 @@ install libglobus_gridftp_server_ceph.so $RPM_BUILD_ROOT%{_libdir}
 
 
 %changelog
+* Fri Nov 10 2017 Ian Johnson <ian.johnson@stfc.ac.uk> 1.3
+- Update library names in BuildRequires
+
 * Mon Feb 06 2017 Bob Builder <bob@buildfarm.com> 1.1
 - Add more xrootd requirements.
 
