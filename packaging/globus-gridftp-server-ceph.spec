@@ -30,12 +30,6 @@ BuildRoot:      %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
 %description
 A plugin for Globus GridFTP to use a Ceph object store as a backend.
 
-This RPM was built against:
-librados2-devel-10.2.10-0.el7.x86_64
-libradosstriper1-devel-10.2.10-0.el7.x86_64
-xrootd-devel-20170317.f34de70-1.el7.x86_64
-xrootd-libs-20170317.f34de70-1.el7.x86_64
-
 
 %prep
 %setup -n gridFTPCephPlugin
