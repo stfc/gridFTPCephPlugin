@@ -8,7 +8,6 @@ License:        STFC
 URL:            https://github.com/stfc/gridFTPCephPlugin
 Source0:        gridFTPCephPlugin.tar.gz
 
-Packager:       Ian Johnson
 Vendor:         STFC Scientific Computing Department
 
 Requires:       globus-gridftp-server-progs
