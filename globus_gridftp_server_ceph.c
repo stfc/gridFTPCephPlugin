@@ -52,6 +52,9 @@ globus_version_t local_version = {
   0 /* branch ID */
 };
 
+void _GlobusGFSErrorGeneric(const char* reason) {
+  GlobusGFSErrorGeneric(reason);
+}
   
 char *cleanup_pathname(char *instr) {
   
@@ -1395,9 +1398,9 @@ static void globus_l_gfs_ceph_read_from_net
   
   globus_gridftp_server_get_optimal_concurrency(ceph_handle->op,
                                                 &ceph_handle->optimal_count);
-  
-//  globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s: optimal_concurrency: %u\n",
-//    func, ceph_handle->optimal_count);
+   
+  globus_gfs_log_message(GLOBUS_GFS_LOG_INFO, "%s: optimal_concurrency: %u\n",
+    func, ceph_handle->optimal_count);
   while(ceph_handle->outstanding < ceph_handle->optimal_count) {
     buffer=globus_malloc(ceph_handle->block_size);
     if (buffer == NULL) {
