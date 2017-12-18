@@ -1160,15 +1160,15 @@ static void globus_l_gfs_ceph_net_read_cb(globus_gfs_operation_t op,
       
     }  else if (ceph_handle->outstanding == 0) { /* if done and there are no outstanding callbacks finish */
       
-      if (ceph_handle->alloc_size >0 && ceph_handle->alloc_size != ceph_handle->fileSize) {
- 
-          globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, 
-            "%s: Incomplete transfer - wrote %lld, expected %lld.\n", func, ceph_handle->fileSize, ceph_handle->alloc_size);
-          globus_ceph_close(func, ceph_handle, "Incomplete transfer");
-          globus_mutex_unlock(&ceph_handle->mutex);
-          globus_gridftp_server_finished_transfer(op, ceph_handle->cached_res);        
-        
-      }
+//      if (ceph_handle->alloc_size >0 && ceph_handle->alloc_size != ceph_handle->fileSize) {
+// 
+//          globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, 
+//            "%s: Incomplete transfer - wrote %lld, expected %lld.\n", func, ceph_handle->fileSize, ceph_handle->alloc_size);
+//          globus_ceph_close(func, ceph_handle, "Incomplete transfer");
+//          globus_mutex_unlock(&ceph_handle->mutex);
+//          globus_gridftp_server_finished_transfer(op, ceph_handle->cached_res);        
+//        
+//      }
       
       globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP, "%s: AFTER check outstanding == 0 \n", __FUNCTION__); 
 
@@ -1509,11 +1509,11 @@ static void globus_l_gfs_ceph_recv(globus_gfs_operation_t op,
   GlobusGFSName(globus_l_gfs_ceph_recv);
   ceph_handle = (globus_l_gfs_ceph_handle_t *) user_arg;
   
-  if (transfer_info->alloc_size > 0) {
-      globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
-          "%s: transfer size = %lu\n", func, transfer_info->alloc_size);
-      ceph_handle->alloc_size = transfer_info->alloc_size;
-  }
+//  if (transfer_info->alloc_size > 0) {
+//      globus_gfs_log_message(GLOBUS_GFS_LOG_DUMP,
+//          "%s: transfer size = %lu\n", func, transfer_info->alloc_size);
+//      ceph_handle->alloc_size = transfer_info->alloc_size;
+//  }
   
   const char* pathname_to_test = cleanup_pathname(transfer_info->pathname);
   pathname =  strdup(pathname_to_test);
