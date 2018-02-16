@@ -480,7 +480,7 @@ static void globus_l_gfs_ceph_stat(globus_gfs_operation_t op,
       globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
               "INFO %s: Return from stat64 = %d\n", __FUNCTION__, status);
       if (status == -EINVAL) {
-        globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%ERROR s: cannot get striper\n", __FUNCTION__);
+        globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "ERROR %s: cannot get striper\n", __FUNCTION__);
       }
       result = globus_l_gfs_make_error("stat64");
       globus_gridftp_server_finished_stat(op, result, NULL, 0);
@@ -552,7 +552,7 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
       if (!allowed) {
         
         globus_gfs_log_message(GLOBUS_GFS_LOG_ERR,
-          "%ERROR s: Authorization failure: cannot DELE %s\n", __FUNCTION__, cmd_info->pathname);   
+          "ERROR %s: Authorization failure: cannot DELE %s\n", __FUNCTION__, cmd_info->pathname);   
         
         snprintf(errormessage, ERRORMSGSIZE, "Authorization error: DELE operation for role %s not allowed on %s", 
           VO_Role, cmd_info->pathname);
@@ -672,7 +672,7 @@ static void globus_l_gfs_ceph_command(globus_gfs_operation_t op,
           globus_gfs_log_message(GLOBUS_GFS_LOG_INFO,
             "INFO %s: Return from stat64 for checksum = %d\n", __FUNCTION__, status);
           if (status == -EINVAL) {
-            globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%ERROR s: cannot get striper\n", __FUNCTION__);
+            globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "ERROR %s: cannot get striper\n", __FUNCTION__);
           }
                    
           char errorBuf[ERRORMSGSIZE];
@@ -1911,7 +1911,7 @@ static globus_bool_t globus_l_gfs_ceph_send_next_to_client
     if (added_checksum == GLOBUS_FALSE) {
 
       ceph_handle->cached_res = GLOBUS_FAILURE;
-      globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "%ERROR s: checksum malloc error \n", func);
+      globus_gfs_log_message(GLOBUS_GFS_LOG_ERR, "ERROR %s: checksum malloc error \n", func);
       globus_free(buffer);
       
       ceph_handle->done = GLOBUS_TRUE;
@@ -2113,7 +2113,7 @@ static void globus_l_gfs_net_write_cb(globus_gfs_operation_t op,
     } else if (ceph_handle->outstanding == 0) {
       /* this is a read, we don't care about the checksum */
       globus_ceph_close(func, ceph_handle, NULL);
-      globus_gfs_log_message(GLOBUS_GFS_LOG_INFO, "%INFO s: finished transfer\n", func);
+      globus_gfs_log_message(GLOBUS_GFS_LOG_INFO, "INFO %s: finished transfer\n", func);
       globus_gridftp_server_finished_transfer(op, ceph_handle->cached_res);
     }
   }
