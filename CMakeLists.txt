@@ -1,4 +1,4 @@
-#
+
 #                      gridftp2/CMakeLists.txt
 #
 # This file is part of the Castor project.
@@ -50,5 +50,5 @@ add_library (globus_gridftp_server_ceph SHARED
 target_link_libraries(globus_gridftp_server_ceph ${RADOS_LIBS} ${XROOTD_LIBS})
 set_target_properties (globus_gridftp_server_ceph PROPERTIES
   LINK_FLAGS "${GLOBUS_FTPLIB} -lz -lXrdUtils")
-set (CMAKE_CXX_FLAGS "--std=c++11 ${CMAKE_CXX_FLAGS}")
+set(CMAKE_CXX_FLAGS "-std=c++14 ${CMAKE_CXX_FLAGS}")
 
