@@ -20,7 +20,7 @@ BuildRequires:  globus-gridftp-server-devel
 BuildRequires:  xrootd-devel
 BuildRequires:  librados2-devel
 BuildRequires:  libradosstriper1-devel
-BuildRequires:  cmake
+BuildRequires:  cmake3
 
 BuildArch:      x86_64
 BuildRoot:      %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
@@ -35,7 +35,7 @@ A plugin for Globus GridFTP to use a Ceph object store as a backend.
 
 
 %build
-cmake ./
+cmake3 ./
 make
 
 
